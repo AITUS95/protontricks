@@ -90,6 +90,40 @@ Protontricks supports `$STEAM_COMPAT_DATA_PATH` variable to set a custom path to
 
 [Wanna see Protontricks in action?](https://asciinema.org/a/229323)
 
+## Multi-disc CD/DVD installations (CDEmu)
+
+The Protontricks GUI includes an optional **Manage CD/DVD drives (CDEmu)**
+action after selecting a Steam game. It can switch the CD-ROM drive exposed
+to an installer running under Proton without requiring manual changes to
+`dosdevices` symlinks.
+
+1. Install CDEmu and load your legally obtained ISO or BIN/CUE images.
+   Mount the loaded CDEmu discs using the desktop file manager or
+   `udisksctl` so the discs have filesystem mount points.
+2. Add the installer to Steam as a non-Steam game, force Proton, and launch
+   it at least once so that its Proton prefix exists.
+3. Run `protontricks --gui`, select the *installer's* Steam shortcut,
+   then choose **Manage CD/DVD drives (CDEmu)**.
+4. Select the Windows drive letter your installer expects (usually `D:`),
+   and the mounted CDEmu reader containing the current disc.
+5. When the installer asks for the next disc, leave it open, load and mount
+   the new disc (preferably in a separate CDEmu reader), then select that
+   reader in the manager. The same Windows letter is updated to point to
+   both the new mount path (`d:`) and its raw device (`d::`).
+6. To undo the changes, select **Restore original mapping** for that drive.
+
+The manager stays open for additional disc changes until its list is closed.
+Only the selected game's Proton prefix is modified; original symlinks are
+recorded for restoration. Existing non-symlink entries and mappings modified
+outside this tool are never silently overwritten. No root privileges are
+required. CDEmu and `findmnt` must be available on the host.
+
+**Limitations:** This helper does not load, unmount, or eject disc images
+itself. Some installers cache the original installation drive or validate
+physical discs using checks that a changed Wine mapping cannot satisfy.
+Launch the setup from the intended Windows CD-ROM letter when necessary.
+Access to CD devices and external mount paths may be restricted by Flatpak.
+
 ## Desktop
 
 Protontricks comes with desktop integration, adding the Protontricks app shortcut and the ability to launch external Windows executables for Proton apps. To run an executable for a Proton app, select **Protontricks Launcher** when opening a Windows executable (eg. **EXE**) in a file manager.

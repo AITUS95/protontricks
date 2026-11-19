@@ -1,3 +1,4 @@
+from pathlib import Path
 import contextlib
 import shutil
 from subprocess import CalledProcessError
@@ -476,3 +477,47 @@ class TestPromptFilesystemAccess:
         assert "/mnt/fake_SSD " not in input_
         assert "/mnt/fake_SSD_2" not in input_
         assert "/mnt/fake_SSD_3" in input_
+
+
+class TestCDROMGUI:
+    def test_action_selection(self, gui_provider):
+        from protontricks.gui import select_gui_action
+
+        gui_provider.mock_stdout = "Manage CD/DVD drives (CDEmu)"
+        assert select_gui_action() == "cdrom"
+        assert "--list" in gui_provider.args
+
+        gui_provider.mock_stdout = "Run Winetricks"
+        assert select_gui_action() == "winetricks"
+
+        gui_provider.mock_stdout = ""
+        assert select_gui_action() is None
+
+    def test_cdrom_drive_selected_and_repeated(self, monkeypatch, tmp_path):
+        from protontricks.cdrom import CDEmuDrive
+        from protontricks.gui import manage_cdrom_drives_gui
+
+        prefix = tmp_path / "pfx"
+        (prefix / "dosdevices").mkdir(parents=True)
+        mount = tmp_path / "disc"
+        mount.mkdir()
+        drive = CDEmuDrive(1, Path("/dev/sr1"), mount, "Disc 2.cue")
+        selections = iter(["D:", "1: /dev/sr1 — " + str(mount) +
+                           " (Disc 2.cue)", None])
+        calls = []
+        monkeypatch.setattr(
+            "protontricks.gui._choose_from_list",
+            lambda *args: next(selections)
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.discover_cdemu_drives",
+            lambda: [drive]
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.set_cdrom_mapping",
+            lambda prefix_path, current, letter:
+            calls.append((prefix_path, current, letter))
+        )
+
+        manage_cdrom_drives_gui(prefix, "Fake game")
+        assert calls == [(prefix, drive, "D")]

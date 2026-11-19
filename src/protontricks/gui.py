@@ -12,6 +12,8 @@ from subprocess import PIPE, CalledProcessError, run
 
 from PIL import Image
 
+from .cdrom import (CDROMError, discover_cdemu_drives, has_cdrom_backup,
+                    restore_cdrom_mapping, set_cdrom_mapping)
 from .config import get_config
 from .flatpak import get_inaccessible_paths
 from .steam import SNAP_STEAM_DIRS
@@ -22,7 +24,8 @@ APP_ICON_SIZE = (32, 32)
 
 __all__ = (
     "LocaleError", "get_gui_provider", "select_steam_app_with_gui",
-    "select_steam_installation", "show_text_dialog", "prompt_filesystem_access"
+    "select_steam_installation", "show_text_dialog", "prompt_filesystem_access",
+    "select_gui_action", "manage_cdrom_drives_gui"
 )
 
 logger = logging.getLogger("protontricks")
@@ -489,3 +492,122 @@ def prompt_filesystem_access(paths, show_dialog=False):
             )
 
     logger.warning(message)
+
+
+def _choose_from_list(title, prompt, rows):
+    """Present a single-column selection dialog with YAD or Zenity."""
+    provider = get_gui_provider()
+    args = [
+        provider, "--list", "--width", "650", "--height", "380",
+        "--title", title, "--text", prompt, "--column", "Option"
+    ]
+    if provider == "yad":
+        args += ["--no-headers", "--no-markup", "--center"]
+    else:
+        args += ["--hide-header"]
+    try:
+        result = _run_gui(args, input_="\n".join(rows))
+    except CalledProcessError as exc:
+        if exc.returncode in (1, 252):
+            return None
+        raise RuntimeError(
+            "{} returned an error: {}".format(provider, exc.stderr)
+        ) from exc
+    value = result.stdout.decode("utf-8").strip()
+    return value or None
+
+
+def select_gui_action():
+    """Choose an action after selecting a Steam game."""
+    selection = _choose_from_list(
+        "Protontricks", "Choose an action for the selected game",
+        ["Run Winetricks", "Manage CD/DVD drives (CDEmu)"]
+    )
+    if selection == "Run Winetricks":
+        return "winetricks"
+    if selection == "Manage CD/DVD drives (CDEmu)":
+        return "cdrom"
+    return None
+
+
+def manage_cdrom_drives_gui(prefix, game_name):
+    """Keep the CDEmu mapping selector available while an installer runs.
+
+    This GUI does not eject or mount images. It maps the chosen mounted disc
+    into one Wine drive letter, then lets the user select a new disc or exit.
+    """
+    letter = _choose_from_list(
+        "Protontricks CD/DVD manager",
+        "Select the Windows drive letter used by the installer",
+        [f"{chr(number)}:" for number in range(ord("D"), ord("Z"))]
+    )
+    if letter is None:
+        return
+    letter = letter.rstrip(":")
+    if len(letter) != 1 or not ("D" <= letter <= "Y"):
+        raise CDROMError("Invalid Windows drive letter.")
+
+    while True:
+        try:
+            drives = discover_cdemu_drives()
+            can_restore = has_cdrom_backup(prefix, letter)
+        except CDROMError as exc:
+            show_text_dialog(
+                "CD/DVD manager", str(exc), "wine", height=250
+            )
+            return
+
+        rows = [
+            "{}: {} — {} ({})".format(
+                drive.slot, drive.device, drive.mountpoint,
+                Path(drive.image).name
+            )
+            for drive in drives
+        ]
+        if can_restore:
+            rows.append("Restore original {}: mapping".format(letter))
+        if not rows:
+            show_text_dialog(
+                "CD/DVD manager",
+                "No mounted CDEmu images were found. Load and mount a "
+                "disc with CDEmu, then reopen the manager.",
+                "wine", height=250
+            )
+            return
+
+        selection = _choose_from_list(
+            "Protontricks CD/DVD manager — " + game_name,
+            "Map a mounted CDEmu disc to {}:. Close this dialog to finish; "
+            "reopen it after loading another disc.".format(letter),
+            rows
+        )
+        if selection is None:
+            return
+
+        try:
+            if selection == "Restore original {}: mapping".format(letter):
+                restore_cdrom_mapping(prefix, letter)
+                continue
+            slot_text = selection.split(":", 1)[0]
+            if not slot_text.isdigit():
+                raise CDROMError("No valid CDEmu drive was selected.")
+            drive = next(
+                (item for item in drives if item.slot == int(slot_text)), None
+            )
+            if drive is None:
+                raise CDROMError("The selected CDEmu drive is no longer available.")
+            # Re-discover just before modifying links to avoid stale mounts.
+            current = next(
+                (item for item in discover_cdemu_drives()
+                 if item.slot == drive.slot and
+                 item.device == drive.device and
+                 item.mountpoint == drive.mountpoint), None
+            )
+            if current is None:
+                raise CDROMError("The mounted disc changed. Please refresh.")
+            set_cdrom_mapping(prefix, current, letter)
+        except (CDROMError, OSError) as exc:
+            show_text_dialog(
+                "CD/DVD manager", str(exc), "wine", height=260
+            )
+            # Offer another choice without touching other Proton prefixes.
