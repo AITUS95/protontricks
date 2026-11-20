@@ -45,6 +45,9 @@ def locale_error_zenity(gui_provider, monkeypatch):
     on first run and working normally on second run
     """
     def mock_subprocess_run(args, **kwargs):
+        # Capture the retry's input so the locale regression test can
+        # verify that list rows are forwarded on the second invocation.
+        gui_provider.kwargs = kwargs
         if not gui_provider.args:
             gui_provider.args = args
             raise CalledProcessError(
