@@ -12,8 +12,12 @@ from subprocess import PIPE, CalledProcessError, run
 
 from PIL import Image
 
-from .cdrom import (CDROMError, discover_cdemu_drives, has_cdrom_backup,
+from .cdrom import (CDROMError, has_cdrom_backup,
                     restore_cdrom_mapping, set_cdrom_mapping)
+from .cdemu_backend import (
+    add_drive, eject_drive, get_owned_drives, list_drives, load_image,
+    mount_drive, remove_drive, to_cdrom_drive, unmount_drive
+)
 from .config import get_config
 from .flatpak import get_inaccessible_paths
 from .steam import SNAP_STEAM_DIRS
@@ -530,84 +534,221 @@ def select_gui_action():
     return None
 
 
-def manage_cdrom_drives_gui(prefix, game_name):
-    """Keep the CDEmu mapping selector available while an installer runs.
+def _select_disc_image():
+    """Choose an ISO/BIN-CUE descriptor using the configured dialog provider."""
+    provider = get_gui_provider()
+    if provider == "yad":
+        args = [
+            "yad", "--file", "--title", "Select a CD/DVD image",
+            "--window-icon", "wine", "--width", "740", "--height", "480"
+        ]
+    else:
+        args = [
+            "zenity", "--file-selection", "--title", "Select a CD/DVD image",
+            "--window-icon", "wine"
+        ]
+    try:
+        result = _run_gui(args)
+    except CalledProcessError as exc:
+        if exc.returncode in (1, 252):
+            return None
+        raise RuntimeError(
+            "The CD/DVD image picker failed: {}".format(exc.stderr)
+        ) from exc
+    filename = result.stdout.decode("utf-8").strip()
+    return Path(filename) if filename else None
 
-    This GUI does not eject or mount images. It maps the chosen mounted disc
-    into one Wine drive letter, then lets the user select a new disc or exit.
+
+def _confirm_cdrom_action(message):
+    return show_text_dialog(
+        title="Confirm CDEmu operation",
+        text=message,
+        window_icon="wine",
+        add_cancel_button=True,
+        ok_label="Continue",
+        cancel_label="Cancel",
+        width=540,
+        height=280
+    )
+
+
+def _cdrom_error_dialog(message):
+    show_text_dialog(
+        "Protontricks CD/DVD Manager", str(message), "wine",
+        width=560, height=260
+    )
+
+
+def _drive_label(drive):
+    if not drive.loaded:
+        state = "Empty"
+    elif drive.mountpoint is None:
+        state = "Loaded (not mounted)"
+    else:
+        state = "Mounted at {}".format(drive.mountpoint)
+    image = Path(drive.image).name if drive.image else "No image"
+    return "Reader {} | {} | {} | {}".format(
+        drive.slot, drive.device, image, state
+    )
+
+
+def manage_cdrom_drives_gui(prefix, game_name):
+    """Manage CDEmu globally and map a reader into one selected Proton prefix.
+
+    Images and devices are system-wide. Only dosdevices links and the record
+    of readers created by this manager are stored in the selected prefix.
     """
-    letter = _choose_from_list(
-        "Protontricks CD/DVD manager",
-        "Select the Windows drive letter used by the installer",
+    selected_letter = _choose_from_list(
+        "Protontricks CD/DVD Manager",
+        "Choose the Windows drive letter for " + game_name,
         [f"{chr(number)}:" for number in range(ord("D"), ord("Z"))]
     )
-    if letter is None:
+    if selected_letter is None:
         return
-    letter = letter.rstrip(":")
+    letter = selected_letter.rstrip(":")
     if len(letter) != 1 or not ("D" <= letter <= "Y"):
         raise CDROMError("Invalid Windows drive letter.")
 
     while True:
         try:
-            drives = discover_cdemu_drives()
+            drives = list_drives()
+            owned = get_owned_drives(prefix)
             can_restore = has_cdrom_backup(prefix, letter)
-        except CDROMError as exc:
-            show_text_dialog(
-                "CD/DVD manager", str(exc), "wine", height=250
-            )
+        except (CDROMError, OSError) as exc:
+            _cdrom_error_dialog(exc)
             return
 
-        rows = [
-            "{}: {} — {} ({})".format(
-                drive.slot, drive.device, drive.mountpoint,
-                Path(drive.image).name
+        actions = {}
+        for drive in drives:
+            actions[_drive_label(drive)] = ("reader", drive.slot)
+        actions["Add virtual reader (system-wide)"] = ("add", None)
+        if drives and {
+            "slot": drives[-1].slot, "device": str(drives[-1].device)
+        } in owned:
+            actions["Remove last reader created for this game"] = (
+                "remove", drives[-1].slot
             )
-            for drive in drives
-        ]
         if can_restore:
-            rows.append("Restore original {}: mapping".format(letter))
-        if not rows:
-            show_text_dialog(
-                "CD/DVD manager",
-                "No mounted CDEmu images were found. Load and mount a "
-                "disc with CDEmu, then reopen the manager.",
-                "wine", height=250
+            actions["Restore original {}: mapping".format(letter)] = (
+                "restore", None
             )
-            return
+        actions["Refresh reader list"] = ("refresh", None)
 
         selection = _choose_from_list(
-            "Protontricks CD/DVD manager — " + game_name,
-            "Map a mounted CDEmu disc to {}:. Close this dialog to finish; "
-            "reopen it after loading another disc.".format(letter),
-            rows
+            "Protontricks CD/DVD Manager — " + game_name,
+            "CDEmu readers are shared by all applications. "
+            "Windows drive {}: belongs only to this game's Proton prefix. "
+            "Select a reader or a management action.".format(letter),
+            list(actions)
         )
         if selection is None:
             return
+        if selection not in actions:
+            _cdrom_error_dialog("Invalid reader/action selection.")
+            continue
+        operation, slot = actions[selection]
 
         try:
-            if selection == "Restore original {}: mapping".format(letter):
-                restore_cdrom_mapping(prefix, letter)
+            if operation == "refresh":
                 continue
-            slot_text = selection.split(":", 1)[0]
-            if not slot_text.isdigit():
-                raise CDROMError("No valid CDEmu drive was selected.")
+
+            if operation == "add":
+                if _confirm_cdrom_action(
+                    "Add a CDEmu virtual reader? This changes the system-"
+                    "wide CDEmu device list, not only this Proton game."
+                ):
+                    add_drive(prefix)
+                continue
+
+            if operation == "remove":
+                if _confirm_cdrom_action(
+                    "Remove the last CDEmu virtual reader? This is a "
+                    "system-wide change. Only an empty reader created "
+                    "by this game's manager can be removed."
+                ):
+                    remove_drive(prefix, slot)
+                continue
+
+            if operation == "restore":
+                if _confirm_cdrom_action(
+                    "Restore the original {}: mapping for this game?".format(
+                        letter
+                    )
+                ):
+                    restore_cdrom_mapping(prefix, letter)
+                continue
+
             drive = next(
-                (item for item in drives if item.slot == int(slot_text)), None
+                (item for item in list_drives() if item.slot == slot), None
             )
             if drive is None:
-                raise CDROMError("The selected CDEmu drive is no longer available.")
-            # Re-discover just before modifying links to avoid stale mounts.
-            current = next(
-                (item for item in discover_cdemu_drives()
-                 if item.slot == drive.slot and
-                 item.device == drive.device and
-                 item.mountpoint == drive.mountpoint), None
+                raise CDROMError("Reader no longer exists. Refresh.")
+
+            options = [
+                "Load or replace CD/DVD image",
+                "Mount loaded disc",
+                "Unmount disc filesystem",
+                "Eject disc image",
+                "Map mounted disc to {}:".format(letter),
+                "Back to readers"
+            ]
+            choice = _choose_from_list(
+                "CD/DVD reader {} — {}".format(slot, game_name),
+                _drive_label(drive) + "\n"
+                "Selecting Load/Mount also updates {}: for this game. "
+                "Eject/Unmount may affect other applications.".format(letter),
+                options
             )
-            if current is None:
-                raise CDROMError("The mounted disc changed. Please refresh.")
-            set_cdrom_mapping(prefix, current, letter)
-        except (CDROMError, OSError) as exc:
-            show_text_dialog(
-                "CD/DVD manager", str(exc), "wine", height=260
-            )
-            # Offer another choice without touching other Proton prefixes.
+            if choice is None or choice == "Back to readers":
+                continue
+
+            if choice == "Load or replace CD/DVD image":
+                image_path = _select_disc_image()
+                if image_path is None:
+                    continue
+                current = next(
+                    (item for item in list_drives() if item.slot == slot), None
+                )
+                if current is None:
+                    raise CDROMError("Reader disappeared. Refresh.")
+                if current.loaded and not _confirm_cdrom_action(
+                    "Replacing the loaded disc will unmount and eject "
+                    "the current image from reader {}. This reader is "
+                    "shared across applications. Continue?".format(slot)
+                ):
+                    continue
+                drive = load_image(
+                    slot, image_path, replace=bool(current.loaded)
+                )
+                set_cdrom_mapping(
+                    prefix, to_cdrom_drive(drive), letter
+                )
+            elif choice == "Mount loaded disc":
+                drive = mount_drive(slot)
+                set_cdrom_mapping(
+                    prefix, to_cdrom_drive(drive), letter
+                )
+            elif choice == "Map mounted disc to {}:".format(letter):
+                drive = next(
+                    (item for item in list_drives() if item.slot == slot), None
+                )
+                if drive is None:
+                    raise CDROMError("Reader disappeared. Refresh.")
+                set_cdrom_mapping(
+                    prefix, to_cdrom_drive(drive), letter
+                )
+            elif choice == "Unmount disc filesystem":
+                if _confirm_cdrom_action(
+                    "Unmount reader {}? This may affect other "
+                    "applications using the disc.".format(slot)
+                ):
+                    unmount_drive(slot)
+            elif choice == "Eject disc image":
+                if _confirm_cdrom_action(
+                    "Unmount and eject reader {}? This affects the "
+                    "shared CDEmu device; the Wine mapping may temporarily "
+                    "point to an unmounted disc.".format(slot)
+                ):
+                    eject_drive(slot)
+        except (CDROMError, OSError, RuntimeError) as exc:
+            _cdrom_error_dialog(exc)
