@@ -116,8 +116,9 @@ to be entered manually.
    `protontricks --gui`. Select the **same Steam installer shortcut**, then
    choose **Manage CD/DVD drives (CDEmu)**.
 4. Select the Windows drive letter required by the installer (usually `D:`).
-   The main menu lists the CDEmu readers plus **Add virtual reader** and
-   **Remove last virtual reader (reader N)**. Selecting a reader
+   The main menu lists the CDEmu readers plus **Add virtual reader** and,
+   when the last reader is 2 or higher, **Remove last virtual reader
+   (reader N)**. Selecting a reader
    offers only **Load or replace disc image** (native image picker),
    **Eject disc**, **Map disc to D:** and **Back**.
 5. **Load or replace disc image** loads, mounts and maps the disc to the
@@ -133,7 +134,8 @@ to be entered manually.
 7. **Remove last virtual reader** removes any empty last reader, including
    readers created outside Protontricks. CDEmu can only remove its **last**
    reader, and a reader still holding a disc image must be emptied with
-   **Eject disc** first.
+   **Eject disc** first. **Readers 0 and 1 are never removed**, so CDEmu
+   keeps its default readers when Protontricks is not in use.
 
 **Compatibility:** If CDEmu is not installed, `protontricks --gui` goes
 directly to the normal Winetricks GUI without the extra action dialog.
