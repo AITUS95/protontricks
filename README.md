@@ -107,22 +107,33 @@ to be entered manually.
 
 ### Workflow
 
-1. Add an installer to Steam, enable Proton and launch it once to create
-   the prefix. Open `protontricks --gui`, select that installer shortcut,
-   and choose **Manage CD/DVD drives (CDEmu)**.
-2. Select the Windows drive letter required by the installer, normally `D:`.
-3. Choose an existing CDEmu reader. You can **Load or replace CD/DVD image**
-   (opens a native image file picker), **Mount loaded disc**, **Unmount disc
+1. **Mount Disc 1 with CDEmu first** (using gCDEmu or the CDEmu CLI), and
+   verify the Windows setup executable is visible in the mounted directory.
+2. In Steam, add that executable (for example `setup.exe`) as a **non-Steam
+   game shortcut**, enable Proton compatibility for the shortcut, and launch
+   it through Steam at least once to start installation and create a prefix.
+3. When the installer asks for Disc 2, **leave the installer open** and open
+   `protontricks --gui`. Select the **same Steam installer shortcut**, then
+   choose **Manage CD/DVD drives (CDEmu)**.
+4. Select the Windows drive letter required by the installer (usually `D:`).
+   Choose an existing CDEmu reader and use **Load or replace CD/DVD image**
+   (the native image picker), **Mount loaded disc**, **Unmount disc
    filesystem**, **Eject disc image**, or **Map mounted disc to D:**.
-4. When an image is loaded or mounted, Protontricks also updates the chosen
-   prefix's `d:` mountpoint and `d::` raw device links. The manager remains
-   open for another disc change; keep the Windows installer open as needed.
-5. Optionally **Add virtual reader** if you need more than one reader. The
-   manager records readers it creates in the selected prefix so the
-   **Remove last reader created for this game** option only appears for its
-   own last, empty, unmapped reader.
-6. Use **Restore original D: mapping** to undo Protontricks's symlink
-   changes for the selected game.
+5. When an image is loaded or mounted, Protontricks also updates the chosen
+   prefix's `d:` mountpoint and `d::` raw device links. Return to the
+   installer and click **Retry/OK**. Repeat for each requested disc.
+6. **If Disc 1 cannot be unmounted because the running installer keeps files
+   open, do not force an eject.** Instead create a **second CDEmu reader**,
+   load and mount Disc 2 there, and map its mounted device to the installer's
+   Windows letter (usually `D:`) using Protontricks.
+7. The manager records readers it creates in the selected prefix so
+   **Remove last reader created for this game** only applies to its own last,
+   empty, unmapped reader. Use **Restore original D: mapping** to undo
+   Protontricks's Wine symlink changes when appropriate.
+
+**Compatibility:** If CDEmu is not installed, `protontricks --gui` goes
+directly to the normal Winetricks GUI without the extra action dialog.
+The CDEmu menu only appears when `cdemu` is available on the host.
 
 **Global scope and safety:** CDEmu readers and images are **system-wide
 resources**, not game-specific resources. Adding, removing, ejecting and
