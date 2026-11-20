@@ -221,6 +221,16 @@ def load_image(slot, image_path, replace=False):
     return mount_drive(slot)
 
 
+# Readers 0 and 1 are CDEmu's default devices and are never removed, so
+# CDEmu keeps working normally when Protontricks is not in use.
+PROTECTED_READER_SLOTS = frozenset({0, 1})
+
+
+def is_removable_slot(slot):
+    """Return True if the manager may remove the given reader slot."""
+    return slot not in PROTECTED_READER_SLOTS
+
+
 def add_drive():
     """Create a system-wide CDEmu reader and return it."""
     before = {drive.slot for drive in list_drives()}
@@ -243,9 +253,14 @@ def remove_drive(slot):
     """Remove the last CDEmu reader, but only while it holds no image.
 
     "cdemu remove-device" always removes the LAST reader, so any other
-    slot is refused. Readers with a loaded or mounted image must be
-    ejected first.
+    slot is refused. Readers 0 and 1 are protected and never removed.
+    Readers with a loaded or mounted image must be ejected first.
     """
+    if not is_removable_slot(slot):
+        raise CDROMError(
+            "Readers 0 and 1 are CDEmu's default readers and cannot be "
+            "removed."
+        )
     drives = list_drives()
     if not drives or drives[-1].slot != slot:
         raise CDROMError(

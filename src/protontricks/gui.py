@@ -15,7 +15,8 @@ from PIL import Image
 from .cdrom import CDROMError, set_cdrom_mapping
 from .cdemu_backend import (
     DeviceBusyError, add_drive, eject_drive, find_empty_drive,
-    list_drives, load_image, mount_drive, remove_drive, to_cdrom_drive
+    is_removable_slot, list_drives, load_image, mount_drive, remove_drive,
+    to_cdrom_drive
 )
 from .config import get_config
 from .flatpak import get_inaccessible_paths
@@ -673,8 +674,9 @@ def manage_cdrom_drives_gui(prefix, game_name):
         for drive in drives:
             actions[_drive_label(drive)] = ("reader", drive.slot)
         actions["Add virtual reader"] = ("add", None)
-        # "cdemu remove-device" can only remove the last reader.
-        if drives:
+        # "cdemu remove-device" can only remove the last reader, and the
+        # default readers 0 and 1 are never offered for removal.
+        if drives and is_removable_slot(drives[-1].slot):
             actions["Remove last virtual reader (reader {})".format(
                 drives[-1].slot
             )] = ("remove", drives[-1].slot)
