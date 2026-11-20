@@ -95,7 +95,7 @@ def test_create_and_remove_only_owned_last_reader(
     monkeypatch.setattr(backend, "list_drives", lambda: drives[:])
     monkeypatch.setattr(backend, "_command", fake_command)
 
-    with pytest.raises(CDROMError, match="last reader"):
+    with pytest.raises(CDROMError, match="not created"):
         backend.remove_drive(prefix, 0)
 
     assert backend.add_drive(prefix).slot == 1
