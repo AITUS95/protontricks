@@ -79,13 +79,16 @@ def test_load_mount_unmount_eject_sequence(monkeypatch, tmp_path):
 
 def test_add_and_remove_last_reader(monkeypatch):
     """Any empty last reader can be removed, including pre-existing ones."""
-    drives = [backend.OpticalDrive(0, Path("/dev/sr0"))]
+    drives = [
+        backend.OpticalDrive(slot, Path("/dev/sr{}".format(slot)))
+        for slot in range(3)
+    ]
     commands = []
 
     def fake_command(args):
         commands.append(args)
         if args == ["cdemu", "add-device"]:
-            drives.append(backend.OpticalDrive(1, Path("/dev/sr1")))
+            drives.append(backend.OpticalDrive(3, Path("/dev/sr3")))
         elif args == ["cdemu", "remove-device"]:
             drives.pop()
         return ""
@@ -93,18 +96,34 @@ def test_add_and_remove_last_reader(monkeypatch):
     monkeypatch.setattr(backend, "list_drives", lambda: drives[:])
     monkeypatch.setattr(backend, "_command", fake_command)
 
-    assert backend.add_drive().slot == 1
+    assert backend.add_drive().slot == 3
     # Only the last reader can be removed by CDEmu.
     with pytest.raises(CDROMError, match="only remove its last reader"):
-        backend.remove_drive(0)
-    assert backend.remove_drive(1).slot == 1
-    # Reader 0 was not created by Protontricks, but it is empty and last.
-    assert backend.remove_drive(0).slot == 0
-    assert drives == []
+        backend.remove_drive(2)
+    assert backend.remove_drive(3).slot == 3
+    # Reader 2 was not created by Protontricks, but it is empty and last.
+    assert backend.remove_drive(2).slot == 2
+    assert [drive.slot for drive in drives] == [0, 1]
     assert commands == [
         ["cdemu", "add-device"], ["cdemu", "remove-device"],
         ["cdemu", "remove-device"]
     ]
+
+
+@pytest.mark.parametrize("slot", [0, 1])
+def test_default_readers_cannot_be_removed(monkeypatch, slot):
+    drives = [
+        backend.OpticalDrive(number, Path("/dev/sr{}".format(number)))
+        for number in range(slot + 1)
+    ]
+    commands = []
+    monkeypatch.setattr(backend, "list_drives", lambda: drives[:])
+    monkeypatch.setattr(backend, "_command", commands.append)
+
+    assert not backend.is_removable_slot(slot)
+    with pytest.raises(CDROMError, match="default readers"):
+        backend.remove_drive(slot)
+    assert commands == []
 
 
 def test_cannot_remove_reader_holding_an_image(monkeypatch, tmp_path):
@@ -114,11 +133,11 @@ def test_cannot_remove_reader_holding_an_image(monkeypatch, tmp_path):
     monkeypatch.setattr(backend, "_command", commands.append)
 
     for drive in (
-            backend.OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso"),
-            backend.OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso", mount)):
+            backend.OpticalDrive(2, Path("/dev/sr2"), "/disc1.iso"),
+            backend.OpticalDrive(2, Path("/dev/sr2"), "/disc1.iso", mount)):
         monkeypatch.setattr(backend, "list_drives", lambda: [drive])
         with pytest.raises(CDROMError, match="Eject the disc"):
-            backend.remove_drive(0)
+            backend.remove_drive(2)
     assert commands == []
 
 

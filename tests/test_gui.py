@@ -633,10 +633,13 @@ class TestCDROMGUI:
 
         prefix = tmp_path / "pfx"
         (prefix / "dosdevices").mkdir(parents=True)
-        drives = []
+        drives = [
+            OpticalDrive(0, Path("/dev/sr0")),
+            OpticalDrive(1, Path("/dev/sr1")),
+        ]
         choices = iter([
             "D:", "Add virtual reader",
-            "Remove last virtual reader (reader 0)", None
+            "Remove last virtual reader (reader 2)", None
         ])
         calls = []
 
@@ -653,7 +656,7 @@ class TestCDROMGUI:
         )
 
         def add_reader():
-            drive = OpticalDrive(0, Path("/dev/sr0"))
+            drive = OpticalDrive(2, Path("/dev/sr2"))
             drives.append(drive)
             calls.append(("add",))
             return drive
@@ -666,7 +669,7 @@ class TestCDROMGUI:
         monkeypatch.setattr("protontricks.gui.add_drive", add_reader)
         monkeypatch.setattr("protontricks.gui.remove_drive", remove_reader)
         manage_cdrom_drives_gui(prefix, "Fake game")
-        assert calls == [("add",), ("remove", 0)]
+        assert calls == [("add",), ("remove", 2)]
 
     def test_remove_reader_with_image_asks_to_eject_first(
             self, monkeypatch, tmp_path):
@@ -677,10 +680,11 @@ class TestCDROMGUI:
         (prefix / "dosdevices").mkdir(parents=True)
         drives = [
             OpticalDrive(0, Path("/dev/sr0")),
-            OpticalDrive(1, Path("/dev/sr1"), "/disc2.iso", tmp_path),
+            OpticalDrive(1, Path("/dev/sr1")),
+            OpticalDrive(2, Path("/dev/sr2"), "/disc2.iso", tmp_path),
         ]
         choices = iter([
-            "D:", "Remove last virtual reader (reader 1)", None
+            "D:", "Remove last virtual reader (reader 2)", None
         ])
         calls = []
 
@@ -889,10 +893,8 @@ class TestCDROMMinimalMenus:
             monkeypatch, tmp_path, drive,
             ["E:", _drive_label(drive), "Back", None]
         )
-        assert menus[1] == [
-            _drive_label(drive), "Add virtual reader",
-            "Remove last virtual reader (reader 0)"
-        ]
+        # Reader 0 is a protected default reader: no remove entry.
+        assert menus[1] == [_drive_label(drive), "Add virtual reader"]
         assert menus[2] == [
             "Load or replace disc image", "Eject disc", "Map disc to E:",
             "Back"
@@ -907,3 +909,16 @@ class TestCDROMMinimalMenus:
             ["D:", _drive_label(drive), "Map disc to D:", None]
         )
         assert calls == [("mount", 1), ("map", 1, "D")]
+
+    def test_remove_entry_is_offered_for_reader_2(
+            self, monkeypatch, tmp_path):
+        from protontricks.gui import _drive_label
+
+        drive = OpticalDrive(2, Path("/dev/sr2"))
+        menus, _ = self._run(
+            monkeypatch, tmp_path, drive, ["D:", None]
+        )
+        assert menus[1] == [
+            _drive_label(drive), "Add virtual reader",
+            "Remove last virtual reader (reader 2)"
+        ]
