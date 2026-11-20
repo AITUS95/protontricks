@@ -103,20 +103,30 @@ devices or disc images.
 
 ### Installing a multi-disc game
 
-1. Load and mount Disc 1 with CDEmu (for example with gCDEmu).
-2. Add the installer (for example `setup.exe`) to Steam as a **non-Steam
-   game**, enable Proton for it and launch it through Steam.
-3. When the installer asks for the next disc, keep it open, run
-   `protontricks --gui`, select the same shortcut and choose **Manage CD/DVD
-   drives (CDEmu)**. Pick the drive letter the installer uses (usually `D:`).
-4. Select the reader holding Disc 1 and choose **Load or replace disc
-   image**. The image is loaded, mounted and mapped to `D:` (both the `d:`
-   mountpoint and `d::` raw device links of the game's prefix).
-5. Return to the installer and click **Retry/OK**. Repeat for each disc.
+Multi-disc installers look for the next disc on the drive they were started
+from, so start the installer from the mapped drive letter, not from its
+Linux path.
 
-If the running installer keeps Disc 1 busy, Protontricks never forces the
-unmount: it offers to load the next disc into an empty reader (adding one if
-needed) and maps `D:` to it. Eject Disc 1 once the installer has finished.
+1. Add the installer from Disc 1 (for example `setup.exe`) to Steam as a
+   **non-Steam game**, enable Proton for it and launch it once to create its
+   prefix, then close the installer.
+2. Run `protontricks --gui`, select that shortcut, choose **Manage CD/DVD
+   drives (CDEmu)** and the drive letter (usually `D:`). Select a reader and
+   **Load or replace disc image** with Disc 1: it is loaded, mounted and
+   mapped to `D:` (the `d:` mountpoint and `d::` raw device links).
+3. Find the shortcut's AppID with `protontricks -s <name>` and start the
+   installer from `D:`:
+
+   ```sh
+   protontricks -c 'wine start /d "D:\\" "D:\\setup.exe"' <APPID>
+   ```
+
+4. When the installer asks for the next disc, use **Load or replace disc
+   image** again. If the running installer keeps Disc 1 busy, Protontricks
+   never forces the unmount: it offers to load the next disc into an empty
+   reader (adding one if needed) and maps `D:` to it. If `D:` is not mapped
+   afterwards, use **Map disc to D:**. Then click **Retry/OK** in the
+   installer. Repeat for each disc and eject the discs once it has finished.
 
 ### Menus
 
@@ -132,9 +142,9 @@ the original links under `.protontricks-cdrom`, are stored in the game's
 prefix; regular files are never overwritten. Wine itself may add or remove
 these links when a disc is mounted or unmounted, so map the disc again after
 a swap if needed. If no reader shows a `/dev/sr` device, load the `vhba`
-kernel module (`sudo modprobe vhba`). Some
-installers may still cache drive information or use copy protection that
-remapping a drive letter cannot work around.
+kernel module (`sudo modprobe vhba`). Some installers may still cache drive
+information or use copy protection that remapping a drive letter cannot work
+around.
 
 ## Desktop
 
