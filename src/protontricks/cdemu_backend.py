@@ -113,10 +113,46 @@ def mount_drive(slot):
     raise CDROMError(message)
 
 
+class DeviceBusyError(CDROMError):
+    """A disc filesystem is in use and cannot be unmounted normally."""
+
+
+# udisks reports a busy filesystem with this D-Bus error name; the kernel
+# message is kept as a fallback for older udisks versions.
+_BUSY_MARKERS = ("UDisks2.Error.DeviceBusy", "target is busy")
+
+
+def find_empty_drive(exclude_slot=None):
+    """Return the first empty CDEmu reader, optionally skipping one slot."""
+    return next(
+        (
+            drive for drive in list_drives()
+            if not drive.loaded and drive.slot != exclude_slot
+        ),
+        None
+    )
+
+
 def unmount_drive(slot):
+    """Unmount a reader's filesystem regularly; never force or lazy-unmount.
+
+    :raises DeviceBusyError: if a running program still uses the disc,
+                             for example an installer started from it
+    """
     drive = _selected_drive(slot)
     if drive.mountpoint is not None:
-        _command(["udisksctl", "unmount", "-b", str(drive.device)])
+        try:
+            _command(["udisksctl", "unmount", "-b", str(drive.device)])
+        except CDROMError as exc:
+            if any(marker in str(exc) for marker in _BUSY_MARKERS):
+                raise DeviceBusyError(
+                    "Reader {} cannot be unmounted because a running "
+                    "program is still using its disc (usually the "
+                    "installer started from it). Load the next disc into "
+                    "another reader instead, or close that program "
+                    "first.".format(slot)
+                ) from exc
+            raise
         drive = _selected_drive(slot)
         if drive.mountpoint is not None:
             raise CDROMError("The filesystem is still mounted.")

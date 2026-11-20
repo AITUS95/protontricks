@@ -15,7 +15,8 @@ from PIL import Image
 from .cdrom import (CDROMError, has_cdrom_backup,
                     restore_cdrom_mapping, set_cdrom_mapping)
 from .cdemu_backend import (
-    add_drive, eject_drive, get_owned_drives, list_drives, load_image,
+    DeviceBusyError, add_drive, eject_drive, find_empty_drive,
+    get_owned_drives, list_drives, load_image,
     mount_drive, remove_drive, to_cdrom_drive, unmount_drive
 )
 from .config import get_config
@@ -611,6 +612,35 @@ def _drive_label(drive):
     )
 
 
+def _load_into_spare_reader(prefix, busy_slot, image_path, letter):
+    """Load an image into another reader when the current one is busy.
+
+    Return the mounted drive, or None if the user cancelled.
+    """
+    spare = find_empty_drive(exclude_slot=busy_slot)
+    busy_message = (
+        "Reader {} is still in use by a running program (usually the "
+        "installer started from that disc), so it cannot be ejected "
+        "safely. It will stay mounted until that program exits; you can "
+        "eject it afterwards.\n\n".format(busy_slot)
+    )
+    if spare is None:
+        if not _confirm_cdrom_action(
+            busy_message + "No empty reader is available. Add a new "
+            "system-wide CDEmu reader, load {} there and map {}: to "
+            "it?".format(Path(image_path).name, letter)
+        ):
+            return None
+        spare = add_drive(prefix)
+    elif not _confirm_cdrom_action(
+        busy_message + "Load {} into empty reader {} instead and map {}: "
+        "to it?".format(Path(image_path).name, spare.slot, letter)
+    ):
+        return None
+
+    return load_image(spare.slot, image_path)
+
+
 def manage_cdrom_drives_gui(prefix, game_name):
     """Manage CDEmu globally and map a reader into one selected Proton prefix.
 
@@ -745,9 +775,18 @@ def manage_cdrom_drives_gui(prefix, game_name):
                     "shared across applications. Continue?".format(slot)
                 ):
                     continue
-                drive = load_image(
-                    slot, image_path, replace=bool(current.loaded)
-                )
+                try:
+                    drive = load_image(
+                        slot, image_path, replace=bool(current.loaded)
+                    )
+                except DeviceBusyError:
+                    # The running installer keeps the current disc busy:
+                    # use another reader instead of forcing an unmount.
+                    drive = _load_into_spare_reader(
+                        prefix, slot, image_path, letter
+                    )
+                    if drive is None:
+                        continue
                 set_cdrom_mapping(
                     prefix, to_cdrom_drive(drive), letter
                 )
