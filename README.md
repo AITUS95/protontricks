@@ -92,72 +92,46 @@ Protontricks supports `$STEAM_COMPAT_DATA_PATH` variable to set a custom path to
 
 ## Multi-disc CD/DVD manager (optional CDEmu integration)
 
-The Protontricks GUI provides **Manage CD/DVD drives (CDEmu)** after
-selecting a Steam game or a non-Steam installer shortcut. The manager uses
-the *selected game's existing Proton prefix* automatically; no AppID needs
-to be entered manually.
+When [CDEmu](https://cdemu.sourceforge.io/) is installed, `protontricks --gui`
+offers **Manage CD/DVD drives (CDEmu)** after selecting a game, to swap disc
+images while a multi-disc Windows installer is running. Without CDEmu, the
+GUI goes straight to Winetricks as before.
 
-### Requirements
+**Requirements:** the CDEmu daemon and `cdemu-client`, `udisksctl`,
+`findmnt`, and YAD or Zenity. Flatpak sandboxes may lack access to the
+devices or disc images.
 
-- CDEmu daemon and `cdemu-client` (`cdemu` command), configured and running.
-- `udisksctl` and `findmnt` available in the host environment.
-- A YAD or Zenity graphical dialog provider.
-- Access to the disc images and CD/DVD device files. In a Flatpak sandbox,
-  filesystem/device restrictions may prevent managing host CDEmu readers.
+### Installing a multi-disc game
 
-### Workflow
+1. Load and mount Disc 1 with CDEmu (for example with gCDEmu).
+2. Add the installer (for example `setup.exe`) to Steam as a **non-Steam
+   game**, enable Proton for it and launch it through Steam.
+3. When the installer asks for the next disc, keep it open, run
+   `protontricks --gui`, select the same shortcut and choose **Manage CD/DVD
+   drives (CDEmu)**. Pick the drive letter the installer uses (usually `D:`).
+4. Select the reader holding Disc 1 and choose **Load or replace disc
+   image**. The image is loaded, mounted and mapped to `D:` (both the `d:`
+   mountpoint and `d::` raw device links of the game's prefix).
+5. Return to the installer and click **Retry/OK**. Repeat for each disc.
 
-1. **Mount Disc 1 with CDEmu first** (using gCDEmu or the CDEmu CLI), and
-   verify the Windows setup executable is visible in the mounted directory.
-2. In Steam, add that executable (for example `setup.exe`) as a **non-Steam
-   game shortcut**, enable Proton compatibility for the shortcut, and launch
-   it through Steam at least once to start installation and create a prefix.
-3. When the installer asks for Disc 2, **leave the installer open** and open
-   `protontricks --gui`. Select the **same Steam installer shortcut**, then
-   choose **Manage CD/DVD drives (CDEmu)**.
-4. Select the Windows drive letter required by the installer (usually `D:`).
-   The main menu lists the CDEmu readers plus **Add virtual reader** and,
-   when the last reader is 2 or higher, **Remove last virtual reader
-   (reader N)**. Selecting a reader
-   offers only **Load or replace disc image** (native image picker),
-   **Eject disc**, **Map disc to D:** and **Back**.
-5. **Load or replace disc image** loads, mounts and maps the disc to the
-   chosen letter (`d:` mountpoint and `d::` raw device links) in one step.
-   **Map disc to D:** mounts a loaded disc if needed before mapping it.
-   Return to the installer and click **Retry/OK**. Repeat for each disc.
-6. **If Disc 1 cannot be unmounted because the running installer keeps files
-   open** ("target is busy"), Protontricks never forces the unmount. After
-   **Load or replace disc image** it offers to load the new disc into an
-   **empty reader** instead (creating one if none is free) and maps the
-   installer's Windows letter (usually `D:`) to it. Disc 1 stays mounted
-   until the installer exits; eject it afterwards with **Eject disc**.
-7. **Remove last virtual reader** removes any empty last reader, including
-   readers created outside Protontricks. CDEmu can only remove its **last**
-   reader, and a reader still holding a disc image must be emptied with
-   **Eject disc** first. **Readers 0 and 1 are never removed**, so CDEmu
-   keeps its default readers when Protontricks is not in use.
+If the running installer keeps Disc 1 busy, Protontricks never forces the
+unmount: it offers to load the next disc into an empty reader (adding one if
+needed) and maps `D:` to it. Eject Disc 1 once the installer has finished.
 
-**Compatibility:** If CDEmu is not installed, `protontricks --gui` goes
-directly to the normal Winetricks GUI without the extra action dialog.
-The CDEmu menu only appears when `cdemu` is available on the host.
+### Menus
 
-**Global scope and safety:** CDEmu readers and images are **system-wide
-resources**, not game-specific resources. Adding, removing, ejecting and
-unmounting a reader can affect unrelated applications. Destructive actions
-require confirmation and regular unmounting (never forced); a busy device
-will not be forcibly ejected. `cdemu remove-device` can remove **only the
-last reader**, and the UI refuses to remove it while it holds a disc image.
-It does not automatically delete global readers when the game is removed.
+- **Main menu:** the CDEmu readers, **Add virtual reader** and **Remove last
+  virtual reader**. CDEmu can only remove its last reader; it must hold no
+  disc image, and the default readers 0 and 1 are never removed.
+- **Reader menu:** **Load or replace disc image**, **Eject disc**, **Map disc
+  to D:** (mounts a loaded disc if needed) and **Back**.
 
-**Per-game scope:** Only the Wine drive mappings (and a backup of the
-original ones, under `.protontricks-cdrom` in the prefix) are stored in the
-game's Proton prefix. Regular files and mappings changed externally are not
-silently overwritten.
-
-**Limitations:** The GUI does not emulate optical drives itself and depends
-on the installed CDEmu daemon and udisks. Some older installers may cache
-drive information or require other CD-ROM/DRM behavior. Removing a Steam
-shortcut may create a different AppID/prefix when added again.
+CDEmu readers and images are **system-wide**: adding, removing or ejecting
+them affects every application. Only the drive mappings, plus a backup of
+the original links under `.protontricks-cdrom`, are stored in the game's
+prefix; mappings changed by other programs are never overwritten. Some
+installers may still cache drive information or use copy protection that
+remapping a drive letter cannot work around.
 
 ## Desktop
 

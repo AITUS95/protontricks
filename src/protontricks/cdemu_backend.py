@@ -5,11 +5,12 @@ No commands run through a shell and no privileged/forced unmounts are used.
 """
 import json
 import re
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .cdrom import CDROMError, CDEmuDrive, _command
+from .cdrom import CDROMError
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,24 @@ class OpticalDrive:
     @property
     def loaded(self):
         return bool(self.image)
+
+
+def _command(args):
+    """Run a command without a shell and return its standard output."""
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, check=False
+        )
+    except FileNotFoundError as exc:
+        raise CDROMError(
+            "{} is not installed. The CD/DVD manager needs cdemu-client, "
+            "udisks2 (udisksctl) and findmnt.".format(args[0])
+        ) from exc
+    if result.returncode:
+        raise CDROMError(
+            "{} failed: {}".format(args[0], result.stderr.strip())
+        )
+    return result.stdout
 
 
 def list_drives():
@@ -76,7 +95,7 @@ def _selected_drive(slot):
     drive = next((d for d in list_drives() if d.slot == slot), None)
     if drive is None:
         raise CDROMError(
-            "CDEmu reader {} no longer exists. Refresh.".format(slot)
+            "CDEmu reader {} no longer exists.".format(slot)
         )
     return drive
 
@@ -276,11 +295,3 @@ def remove_drive(slot):
         )
     _command(["cdemu", "remove-device"])
     return drive
-
-
-def to_cdrom_drive(drive):
-    if drive.mountpoint is None:
-        raise CDROMError("Mount the disc before assigning a Windows drive.")
-    return CDEmuDrive(
-        drive.slot, drive.device, drive.mountpoint, drive.image
-    )

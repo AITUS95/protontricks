@@ -1,14 +1,20 @@
-"""Unit tests for the opt-in CDEmu drive manager."""
-import json
+"""Unit tests for per-prefix CD/DVD drive mappings."""
 import os
 from pathlib import Path
 
 import pytest
 
-from protontricks.cdrom import (
-    CDROMError, CDEmuDrive, discover_cdemu_drives, has_cdrom_backup,
-    restore_cdrom_mapping, set_cdrom_mapping
-)
+from protontricks.cdemu_backend import OpticalDrive
+from protontricks.cdrom import CDROMError, set_cdrom_mapping
+
+
+def CDEmuDrive(slot, device, mountpoint, image="/disc.iso"):
+    """Build a mounted reader as returned by cdemu_backend.list_drives()."""
+    return OpticalDrive(slot, device, image, mountpoint)
+
+
+def has_backup(prefix, letter="d"):
+    return (prefix / ".protontricks-cdrom" / (letter + ".json")).exists()
 
 
 @pytest.fixture
@@ -18,36 +24,7 @@ def prefix(tmp_path):
     return path
 
 
-def test_discover_mounted_cdemu_discs(monkeypatch, tmp_path):
-    disc = tmp_path / "Disc Two"
-    disc.mkdir()
-
-    def command(args):
-        if args[:2] == ["cdemu", "device-mapping"]:
-            return (
-                "Device mapping:\nDEV   SCSI CD-ROM   SCSI generic\n"
-                "0 /dev/sr0 /dev/sg1\n1 /dev/sr1 /dev/sg2\n"
-            )
-        if args[:2] == ["cdemu", "status"]:
-            return (
-                "Devices' status:\nDEV LOADED FILENAME\n"
-                "0 True /discs/one.cue\n1 True /discs/two.cue\n"
-            )
-        if args[0] == "findmnt":
-            if args[3] == "/dev/sr1":
-                return json.dumps({"filesystems": [{"target": str(disc)}]})
-            raise CDROMError("Not mounted")
-        raise AssertionError(args)
-
-    monkeypatch.setattr("protontricks.cdrom._command", command)
-    drives = discover_cdemu_drives()
-    assert len(drives) == 1
-    assert drives[0] == CDEmuDrive(
-        1, Path("/dev/sr1"), disc, "/discs/two.cue"
-    )
-
-
-def test_switch_and_restore_original_mapping(prefix, tmp_path):
+def test_switch_mapping_and_keep_original_backup(prefix, tmp_path):
     dos = prefix / "dosdevices"
     (dos / "d:").symlink_to("/old/cdrom")
     (dos / "d::").symlink_to("/dev/sr0")
@@ -61,29 +38,23 @@ def test_switch_and_restore_original_mapping(prefix, tmp_path):
     )
     assert os.readlink(dos / "d:") == str(disc2)
     assert os.readlink(dos / "d::") == "/dev/sr1"
-    assert has_cdrom_backup(prefix, "D")
+    assert has_backup(prefix)
 
     set_cdrom_mapping(
         prefix, CDEmuDrive(2, Path("/dev/sr2"), disc3), "D"
     )
     assert os.readlink(dos / "d:") == str(disc3)
     assert os.readlink(dos / "d::") == "/dev/sr2"
-
-    restore_cdrom_mapping(prefix, "D")
-    assert os.readlink(dos / "d:") == "/old/cdrom"
-    assert os.readlink(dos / "d::") == "/dev/sr0"
-    assert not has_cdrom_backup(prefix, "D")
+    # The very first (original) links stay in the backup.
+    backup = (prefix / ".protontricks-cdrom" / "d.json").read_text()
+    assert "/old/cdrom" in backup and "/dev/sr0" in backup
 
 
-def test_restore_absent_original_links(prefix, tmp_path):
-    mounted = tmp_path / "disc"
-    mounted.mkdir()
-    set_cdrom_mapping(
-        prefix, CDEmuDrive(0, Path("/dev/sr0"), mounted)
-    )
-    restore_cdrom_mapping(prefix)
-    assert not os.path.lexists(prefix / "dosdevices" / "d:")
-    assert not os.path.lexists(prefix / "dosdevices" / "d::")
+def test_mapping_requires_a_mounted_disc(prefix):
+    with pytest.raises(CDROMError, match="Mount the disc"):
+        set_cdrom_mapping(
+            prefix, OpticalDrive(0, Path("/dev/sr0"), "/disc.iso")
+        )
 
 
 def test_refuse_to_overwrite_regular_file(prefix, tmp_path):
@@ -108,8 +79,6 @@ def test_detect_external_changes(prefix, tmp_path):
 
     with pytest.raises(CDROMError, match="outside Protontricks"):
         set_cdrom_mapping(prefix, drive)
-    with pytest.raises(CDROMError, match="externally"):
-        restore_cdrom_mapping(prefix)
     assert os.readlink(link) == "/external/change"
 
 
@@ -129,29 +98,6 @@ def test_invalid_drive_letter(prefix, tmp_path):
         set_cdrom_mapping(
             prefix, CDEmuDrive(0, Path("/dev/sr0"), mounted), "C"
         )
-
-
-def test_command_reports_missing_tool(monkeypatch):
-    from protontricks import cdrom
-
-    def missing(*args, **kwargs):
-        raise FileNotFoundError("cdemu")
-
-    monkeypatch.setattr(cdrom.subprocess, "run", missing)
-    with pytest.raises(CDROMError, match="cdemu-client"):
-        cdrom._command(["cdemu", "status"])
-
-
-def test_command_reports_failing_tool(monkeypatch):
-    from protontricks import cdrom
-    from subprocess import CompletedProcess
-
-    def failed(args, **kwargs):
-        return CompletedProcess(args, 1, "", "D-Bus disconnected")
-
-    monkeypatch.setattr(cdrom.subprocess, "run", failed)
-    with pytest.raises(CDROMError, match="D-Bus disconnected"):
-        cdrom._command(["cdemu", "status"])
 
 
 def test_mapping_rollback_if_second_symlink_fails(
@@ -178,7 +124,7 @@ def test_mapping_rollback_if_second_symlink_fails(
         )
     assert os.readlink(dosdevices / "d:") == "/old/mount"
     assert os.readlink(dosdevices / "d::") == "/dev/sr0"
-    assert not has_cdrom_backup(prefix)
+    assert not has_backup(prefix)
 
 
 def test_stale_temp_backup_reports_path_and_restores_links(

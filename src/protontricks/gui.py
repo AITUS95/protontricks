@@ -15,8 +15,7 @@ from PIL import Image
 from .cdrom import CDROMError, set_cdrom_mapping
 from .cdemu_backend import (
     DeviceBusyError, add_drive, eject_drive, find_empty_drive,
-    is_removable_slot, list_drives, load_image, mount_drive, remove_drive,
-    to_cdrom_drive
+    is_removable_slot, list_drives, load_image, mount_drive, remove_drive
 )
 from .config import get_config
 from .flatpak import get_inaccessible_paths
@@ -775,16 +774,12 @@ def manage_cdrom_drives_gui(prefix, game_name):
                     )
                     if drive is None:
                         continue
-                set_cdrom_mapping(
-                    prefix, to_cdrom_drive(drive), letter
-                )
+                set_cdrom_mapping(prefix, drive, letter)
             elif choice == map_option:
                 # Mount a loaded but unmounted disc first, so mapping works
                 # without a separate mount step.
                 drive = mount_drive(slot)
-                set_cdrom_mapping(
-                    prefix, to_cdrom_drive(drive), letter
-                )
+                set_cdrom_mapping(prefix, drive, letter)
             elif choice == "Eject disc":
                 if _confirm_cdrom_action(
                     "Unmount and eject reader {}? This affects the "

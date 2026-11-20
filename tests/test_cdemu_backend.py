@@ -447,3 +447,23 @@ def test_find_empty_drive_skips_busy_and_loaded_readers(monkeypatch):
 
     assert backend.find_empty_drive(exclude_slot=0).slot == 2
     assert backend.find_empty_drive(exclude_slot=2) is None
+
+
+def test_command_reports_missing_tool(monkeypatch):
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("cdemu")
+
+    monkeypatch.setattr(backend.subprocess, "run", missing)
+    with pytest.raises(CDROMError, match="cdemu-client"):
+        backend._command(["cdemu", "status"])
+
+
+def test_command_reports_failing_tool(monkeypatch):
+    from subprocess import CompletedProcess
+
+    def failed(args, **kwargs):
+        return CompletedProcess(args, 1, "", "D-Bus disconnected")
+
+    monkeypatch.setattr(backend.subprocess, "run", failed)
+    with pytest.raises(CDROMError, match="D-Bus disconnected"):
+        backend._command(["cdemu", "status"])

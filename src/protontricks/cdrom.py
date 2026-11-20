@@ -1,84 +1,16 @@
-"""Manage CDEmu-backed Wine drive mappings for one Proton prefix.
+"""Map a mounted CD/DVD to a Windows drive letter in one Proton prefix.
 
-The device operations (mount, unmount, load and eject) live in the optional
-cdemu_backend module. This module changes only dosdevices links and backups.
+Only the prefix's dosdevices links (and a backup of the original links)
+are changed here; CDEmu device operations live in cdemu_backend.
 """
 import json
 import os
 import re
-import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 
 
 class CDROMError(Exception):
     """An expected CD-ROM discovery or mapping failure."""
-
-
-@dataclass(frozen=True)
-class CDEmuDrive:
-    slot: int
-    device: Path
-    mountpoint: Path
-    image: str = ""
-
-
-def _command(args):
-    try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, check=False
-        )
-    except FileNotFoundError as exc:
-        raise CDROMError(
-            "CDEmu and findmnt are required. Install cdemu-client and "
-            "mount the image before using this manager."
-        ) from exc
-    if result.returncode:
-        raise CDROMError(
-            "{} failed: {}".format(args[0], result.stderr.strip())
-        )
-    return result.stdout
-
-
-def discover_cdemu_drives():
-    """Discover mounted CDEmu images without assuming /dev/sr numbers."""
-    mapping = _command(["cdemu", "device-mapping"])
-    status = _command(["cdemu", "status"])
-    images = {}
-    for line in status.splitlines():
-        match = re.match(r"^\s*(\d+)\s+(True|False)\s*(.*)$", line)
-        if match and match.group(2) == "True":
-            images[int(match.group(1))] = match.group(3).strip()
-
-    drives = []
-    for line in mapping.splitlines():
-        match = re.match(r"^\s*(\d+)\s+(/dev/\S+)\s+", line)
-        if not match:
-            continue
-        slot = int(match.group(1))
-        if slot not in images:
-            continue
-        device = Path(match.group(2))
-        try:
-            data = json.loads(_command([
-                "findmnt", "--json", "--source", str(device),
-                "--output", "TARGET"
-            ]))
-        except (CDROMError, json.JSONDecodeError):
-            # Loaded images are not necessarily mounted.
-            continue
-        filesystems = data.get("filesystems") or []
-        if not filesystems:
-            continue
-        target = filesystems[0].get("target")
-        if not target:
-            continue
-        mountpoint = Path(target)
-        if not mountpoint.is_dir():
-            continue
-        drives.append(CDEmuDrive(slot, device, mountpoint, images[slot]))
-
-    return sorted(drives, key=lambda d: d.slot)
 
 
 def _paths(prefix, letter):
@@ -186,26 +118,21 @@ def _load_state(path):
     return state
 
 
-def has_cdrom_backup(prefix, letter="D"):
-    _, path = _paths(prefix, letter)
-    return os.path.lexists(path)
-
-
 def set_cdrom_mapping(prefix, drive, letter="D"):
-    """Point a Windows letter and its raw-device link to a mounted CDEmu disc.
+    """Point a Windows letter and its raw-device link to a mounted disc.
 
-    The original mapping is saved once, and later changes preserve it.
-    Refuse to clobber a mapping changed by Wine or another program meanwhile.
+    The original links are backed up once under .protontricks-cdrom in the
+    prefix. A mapping changed by Wine or another program is never clobbered.
     """
     links, path = _paths(prefix, letter)
-    if not drive.mountpoint.is_dir():
-        raise CDROMError("The selected CDEmu disc is not mounted.")
+    if drive.mountpoint is None or not Path(drive.mountpoint).is_dir():
+        raise CDROMError("Mount the disc before mapping it.")
     previous = _targets(links)
     state = _load_state(path)
     if state and previous != state["current"]:
         raise CDROMError(
-            "The mapping was changed outside Protontricks. Restore or "
-            "resolve the mapping manually before continuing."
+            "The {}: mapping was changed outside Protontricks; fix it "
+            "manually before continuing.".format(letter.upper())
         )
     target = [str(drive.mountpoint), str(drive.device)]
     new_state = {
@@ -220,17 +147,3 @@ def set_cdrom_mapping(prefix, drive, letter="D"):
     except Exception:
         _set_links(links, previous)
         raise
-
-
-def restore_cdrom_mapping(prefix, letter="D"):
-    """Restore both original links; refuse if another tool modified them."""
-    links, path = _paths(prefix, letter)
-    state = _load_state(path)
-    if not state:
-        raise CDROMError("There is no CD-ROM mapping to restore.")
-    if _targets(links) != state["current"]:
-        raise CDROMError(
-            "Drive mappings changed externally; refusing to overwrite."
-        )
-    _set_links(links, state["original"])
-    path.unlink()
