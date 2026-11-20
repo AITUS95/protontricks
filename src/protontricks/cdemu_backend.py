@@ -215,11 +215,17 @@ def remove_drive(prefix, slot):
                 "This reader is still mapped in Wine. Restore or change "
                 "the mapping before removing it."
             )
-    _command(["cdemu", "remove-device"])
     remaining = [entry for entry in owned if entry != {
         "slot": slot, "device": str(drive.device)
     }]
+    # Retire the ownership record first: a failed write must not leave a
+    # stale record that could authorize removal of a newly reused slot.
     _save_owned(prefix, remaining)
+    try:
+        _command(["cdemu", "remove-device"])
+    except Exception:
+        _save_owned(prefix, owned)
+        raise
     return drive
 
 
