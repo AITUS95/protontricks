@@ -556,9 +556,6 @@ class TestCDROMGUI:
             "protontricks.gui.list_drives", lambda: []
         )
         monkeypatch.setattr(
-            "protontricks.gui.get_owned_drives", lambda prefix: []
-        )
-        monkeypatch.setattr(
             "protontricks.gui._cdrom_error_dialog",
             lambda message: errors.append(str(message))
         )
@@ -605,10 +602,6 @@ class TestCDROMGUI:
             lambda: [drive]
         )
         monkeypatch.setattr(
-            "protontricks.gui.get_owned_drives",
-            lambda prefix_path: []
-        )
-        monkeypatch.setattr(
             "protontricks.gui._select_disc_image", lambda: cue
         )
         monkeypatch.setattr(
@@ -641,10 +634,9 @@ class TestCDROMGUI:
         prefix = tmp_path / "pfx"
         (prefix / "dosdevices").mkdir(parents=True)
         drives = []
-        owned = []
         choices = iter([
             "D:", "Add virtual reader",
-            "Remove last virtual reader", None
+            "Remove last virtual reader (reader 0)", None
         ])
         calls = []
 
@@ -656,32 +648,66 @@ class TestCDROMGUI:
             "protontricks.gui.list_drives", lambda: list(drives)
         )
         monkeypatch.setattr(
-            "protontricks.gui.get_owned_drives",
-            lambda path: list(owned)
-        )
-        monkeypatch.setattr(
             "protontricks.gui._confirm_cdrom_action",
             lambda *args: True
         )
 
-        def add_reader(path):
+        def add_reader():
             drive = OpticalDrive(0, Path("/dev/sr0"))
             drives.append(drive)
-            owned.append({"slot": 0, "device": "/dev/sr0"})
-            calls.append(("add", path))
+            calls.append(("add",))
             return drive
 
-        def remove_reader(path, slot):
-            calls.append(("remove", path, slot))
+        def remove_reader(slot):
+            calls.append(("remove", slot))
             drives.pop()
             return slot
 
         monkeypatch.setattr("protontricks.gui.add_drive", add_reader)
         monkeypatch.setattr("protontricks.gui.remove_drive", remove_reader)
         manage_cdrom_drives_gui(prefix, "Fake game")
-        assert calls == [
-            ("add", prefix), ("remove", prefix, 0)
+        assert calls == [("add",), ("remove", 0)]
+
+    def test_remove_reader_with_image_asks_to_eject_first(
+            self, monkeypatch, tmp_path):
+        from protontricks.cdemu_backend import OpticalDrive
+        from protontricks.gui import manage_cdrom_drives_gui
+
+        prefix = tmp_path / "pfx"
+        (prefix / "dosdevices").mkdir(parents=True)
+        drives = [
+            OpticalDrive(0, Path("/dev/sr0")),
+            OpticalDrive(1, Path("/dev/sr1"), "/disc2.iso", tmp_path),
         ]
+        choices = iter([
+            "D:", "Remove last virtual reader (reader 1)", None
+        ])
+        calls = []
+
+        monkeypatch.setattr(
+            "protontricks.gui._choose_from_list",
+            lambda *args: next(choices)
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.list_drives", lambda: list(drives)
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._confirm_cdrom_action",
+            lambda *args: calls.append(("confirm",)) or True
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.remove_drive",
+            lambda slot: calls.append(("remove", slot))
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._cdrom_error_dialog",
+            lambda message: calls.append(("error", str(message)))
+        )
+        manage_cdrom_drives_gui(prefix, "Fake game")
+
+        assert len(calls) == 1
+        assert calls[0][0] == "error"
+        assert "Eject the disc" in calls[0][1]
 
     def test_disc_image_picker_cancel(self, gui_provider):
         from protontricks.gui import _select_disc_image
@@ -721,12 +747,12 @@ class TestCDROMBusyDiscFallback:
                 tmp_path
             )
 
-        def add_drive(path):
+        def add_drive():
             drive = OpticalDrive(len(drives), Path(
                 "/dev/sr{}".format(len(drives))
             ))
             drives.append(drive)
-            calls.append(("add", path))
+            calls.append(("add",))
             return drive
 
         monkeypatch.setattr(
@@ -742,9 +768,6 @@ class TestCDROMBusyDiscFallback:
                 (d for d in drives
                  if not d.loaded and d.slot != exclude_slot), None
             )
-        )
-        monkeypatch.setattr(
-            "protontricks.gui.get_owned_drives", lambda path: []
         )
         monkeypatch.setattr(
             "protontricks.gui._select_disc_image", lambda: disc2
@@ -798,7 +821,7 @@ class TestCDROMBusyDiscFallback:
         actions = [call for call in calls if call[0] != "confirm"]
         assert actions == [
             ("load", 0, disc2, True),
-            ("add", prefix),
+            ("add",),
             ("load", 1, disc2, False),
             ("map", 1, "D")
         ]
@@ -840,9 +863,6 @@ class TestCDROMMinimalMenus:
         monkeypatch.setattr("protontricks.gui._choose_from_list", choose)
         monkeypatch.setattr("protontricks.gui.list_drives", lambda: [drive])
         monkeypatch.setattr(
-            "protontricks.gui.get_owned_drives", lambda path: []
-        )
-        monkeypatch.setattr(
             "protontricks.gui.mount_drive",
             lambda slot: calls.append(("mount", slot)) or OpticalDrive(
                 slot, drive.device, drive.image, tmp_path
@@ -869,7 +889,10 @@ class TestCDROMMinimalMenus:
             monkeypatch, tmp_path, drive,
             ["E:", _drive_label(drive), "Back", None]
         )
-        assert menus[1] == [_drive_label(drive), "Add virtual reader"]
+        assert menus[1] == [
+            _drive_label(drive), "Add virtual reader",
+            "Remove last virtual reader (reader 0)"
+        ]
         assert menus[2] == [
             "Load or replace disc image", "Eject disc", "Map disc to E:",
             "Back"

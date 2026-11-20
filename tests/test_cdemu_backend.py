@@ -1,4 +1,4 @@
-"""Tests for CDEmu's system-wide operations and per-game ownership."""
+"""Tests for CDEmu's system-wide reader and image operations."""
 import json
 from pathlib import Path
 
@@ -77,10 +77,8 @@ def test_load_mount_unmount_eject_sequence(monkeypatch, tmp_path):
     ]
 
 
-def test_create_and_remove_only_owned_last_reader(
-        monkeypatch, tmp_path):
-    prefix = tmp_path / "pfx"
-    (prefix / "dosdevices").mkdir(parents=True)
+def test_add_and_remove_last_reader(monkeypatch):
+    """Any empty last reader can be removed, including pre-existing ones."""
     drives = [backend.OpticalDrive(0, Path("/dev/sr0"))]
     commands = []
 
@@ -95,35 +93,33 @@ def test_create_and_remove_only_owned_last_reader(
     monkeypatch.setattr(backend, "list_drives", lambda: drives[:])
     monkeypatch.setattr(backend, "_command", fake_command)
 
-    with pytest.raises(CDROMError, match="not created"):
-        backend.remove_drive(prefix, 0)
-
-    assert backend.add_drive(prefix).slot == 1
-    assert backend.get_owned_drives(prefix) == [
-        {"slot": 1, "device": "/dev/sr1"}
-    ]
-    mapping = prefix / "dosdevices" / "d::"
-    mapping.symlink_to("/dev/sr1")
-    with pytest.raises(CDROMError, match="still mapped"):
-        backend.remove_drive(prefix, 1)
-    mapping.unlink()
-
-    assert backend.remove_drive(prefix, 1).slot == 1
-    assert backend.get_owned_drives(prefix) == []
+    assert backend.add_drive().slot == 1
+    # Only the last reader can be removed by CDEmu.
+    with pytest.raises(CDROMError, match="only remove its last reader"):
+        backend.remove_drive(0)
+    assert backend.remove_drive(1).slot == 1
+    # Reader 0 was not created by Protontricks, but it is empty and last.
+    assert backend.remove_drive(0).slot == 0
+    assert drives == []
     assert commands == [
-        ["cdemu", "add-device"], ["cdemu", "remove-device"]
+        ["cdemu", "add-device"], ["cdemu", "remove-device"],
+        ["cdemu", "remove-device"]
     ]
 
 
-def test_cannot_remove_external_reader(monkeypatch, tmp_path):
-    prefix = tmp_path / "pfx"
-    (prefix / "dosdevices").mkdir(parents=True)
-    monkeypatch.setattr(
-        backend, "list_drives",
-        lambda: [backend.OpticalDrive(0, Path("/dev/sr0"))]
-    )
-    with pytest.raises(CDROMError, match="not created"):
-        backend.remove_drive(prefix, 0)
+def test_cannot_remove_reader_holding_an_image(monkeypatch, tmp_path):
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    commands = []
+    monkeypatch.setattr(backend, "_command", commands.append)
+
+    for drive in (
+            backend.OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso"),
+            backend.OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso", mount)):
+        monkeypatch.setattr(backend, "list_drives", lambda: [drive])
+        with pytest.raises(CDROMError, match="Eject the disc"):
+            backend.remove_drive(0)
+    assert commands == []
 
 
 def test_external_mount_failure_does_not_force_eject(
