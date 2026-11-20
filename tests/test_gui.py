@@ -484,7 +484,7 @@ class TestCDROMGUI:
         from protontricks.gui import select_gui_action
 
         (home_dir / ".local" / "bin" / "cdemu").touch()
-        gui_provider.mock_stdout = "Manage CD/DVD drives (CDEmu)|\\n"
+        gui_provider.mock_stdout = "Manage CD/DVD drives (CDEmu)|\n"
         assert select_gui_action() == "cdrom"
         assert "--separator" in gui_provider.args
         assert gui_provider.args[
@@ -492,7 +492,7 @@ class TestCDROMGUI:
         ] == ""
         assert "--print-column" in gui_provider.args
 
-        gui_provider.mock_stdout = "Run Winetricks|\\n"
+        gui_provider.mock_stdout = "Run Winetricks|\n"
         assert select_gui_action() == "winetricks"
 
         gui_provider.mock_stdout = ""
@@ -509,7 +509,7 @@ class TestCDROMGUI:
 
         monkeypatch.setenv("PROTONTRICKS_GUI", "zenity")
         get_gui_provider.cache_clear()
-        gui_provider.mock_stdout = "D:\\n"
+        gui_provider.mock_stdout = "D:\n"
         assert _choose_from_list("Title", "Prompt", ["D:", "E:"]) == "D:"
         assert "--separator" not in gui_provider.args
 
@@ -570,12 +570,12 @@ class TestCDROMGUI:
 
         locale_error_zenity.mock_stdout = "D:"
         result = _choose_from_list(
-            "CD/DVD Manager - unicode \\u00e9",
+            "CD/DVD Manager - unicode é",
             "Select unit",
             ["D:", "E:"]
         )
         assert result == "D:"
-        assert locale_error_zenity.kwargs["input"] == b"D:\\nE:"
+        assert locale_error_zenity.kwargs["input"] == b"D:\nE:"
 
     def test_load_image_and_assign_to_selected_prefix(
             self, monkeypatch, tmp_path):
