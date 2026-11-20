@@ -1,7 +1,7 @@
-"""Manage CDEmu-backed Wine CD-ROM drive mappings for one Proton prefix.
+"""Manage CDEmu-backed Wine drive mappings for one Proton prefix.
 
-This module does not mount or eject images: discs must already be mounted by
-the desktop or CDEmu. It only changes the selected prefix's dosdevices links.
+The device operations (mount, unmount, load and eject) live in the optional
+cdemu_backend module. This module changes only dosdevices links and backups.
 """
 import json
 import os
@@ -41,7 +41,7 @@ def _command(args):
 
 
 def discover_cdemu_drives():
-    """Return loaded, mounted CDEmu devices, without assuming /dev/sr numbers."""
+    """Discover mounted CDEmu images without assuming /dev/sr numbers."""
     mapping = _command(["cdemu", "device-mapping"])
     status = _command(["cdemu", "status"])
     images = {}
@@ -87,7 +87,9 @@ def _paths(prefix, letter):
     prefix = Path(prefix)
     dosdevices = prefix / "dosdevices"
     if not dosdevices.is_dir() or dosdevices.is_symlink():
-        raise CDROMError("The selected Proton prefix has no valid dosdevices directory.")
+        raise CDROMError(
+            "The selected Proton prefix has no valid dosdevices directory."
+        )
     letter = letter.lower()
     links = (dosdevices / (letter + ":"), dosdevices / (letter + "::"))
     state = prefix / ".protontricks-cdrom" / (letter + ".json")
@@ -101,7 +103,8 @@ def _targets(links):
             targets.append(os.readlink(link))
         elif os.path.lexists(link):
             raise CDROMError(
-                "{} exists but is not a symlink; refusing to overwrite it.".format(link)
+                "{} exists but is not a symlink; refusing to overwrite "
+                "it.".format(link)
             )
         else:
             targets.append(None)
@@ -119,7 +122,9 @@ def _set_links(links, targets):
                 continue
             temp = link.with_name(link.name + ".protontricks-new")
             if os.path.lexists(temp):
-                raise CDROMError("Temporary mapping already exists: {}".format(temp))
+                raise CDROMError(
+                    "Temporary mapping already exists: {}".format(temp)
+                )
             os.symlink(target, temp)
             try:
                 os.replace(temp, link)
@@ -148,7 +153,9 @@ def _save_state(path, state):
         raise CDROMError("Refusing to overwrite a symlinked CD-ROM backup.")
     temp = path.with_suffix(".tmp")
     if os.path.lexists(temp):
-        raise CDROMError("A temporary CD-ROM backup already exists.")
+        raise CDROMError(
+            "A temporary CD-ROM backup already exists: {}".format(temp)
+        )
     try:
         with temp.open("x", encoding="utf-8") as file:
             json.dump(state, file)
@@ -222,6 +229,8 @@ def restore_cdrom_mapping(prefix, letter="D"):
     if not state:
         raise CDROMError("There is no CD-ROM mapping to restore.")
     if _targets(links) != state["current"]:
-        raise CDROMError("Drive mappings changed externally; refusing to overwrite.")
+        raise CDROMError(
+            "Drive mappings changed externally; refusing to overwrite."
+        )
     _set_links(links, state["original"])
     path.unlink()
