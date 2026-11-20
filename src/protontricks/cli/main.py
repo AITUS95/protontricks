@@ -221,7 +221,11 @@ class RunWinetricksGUICommand(BaseCommand):
     winetricks_required = False
 
     def run(self):
-        action = select_gui_action()
+        # Explicit Winetricks CLI arguments must not open the CDEmu chooser.
+        action = (
+            "winetricks" if self.cli_args.winetricks_command
+            else select_gui_action()
+        )
         if action == "cdrom":
             manage_cdrom_drives_gui(
                 self.steam_app.prefix_path, self.steam_app.name
