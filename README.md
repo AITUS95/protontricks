@@ -123,9 +123,11 @@ to be entered manually.
    prefix's `d:` mountpoint and `d::` raw device links. Return to the
    installer and click **Retry/OK**. Repeat for each requested disc.
 6. **If Disc 1 cannot be unmounted because the running installer keeps files
-   open, do not force an eject.** Instead create a **second CDEmu reader**,
-   load and mount Disc 2 there, and map its mounted device to the installer's
-   Windows letter (usually `D:`) using Protontricks.
+   open** ("target is busy"), Protontricks never forces the unmount. After
+   **Load or replace CD/DVD image** it offers to load the new disc into an
+   **empty reader** instead (creating one if none is free) and maps the
+   installer's Windows letter (usually `D:`) to it. Disc 1 stays mounted
+   until the installer exits; eject it afterwards.
 7. The manager records readers it creates in the selected prefix so
    **Remove last reader created for this game** only applies to its own last,
    empty, unmapped reader. Use **Restore original D: mapping** to undo
