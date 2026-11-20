@@ -204,3 +204,67 @@ def test_missing_reader_status_is_not_treated_as_empty(monkeypatch):
     monkeypatch.setattr(backend, "_command", fake_command)
     with pytest.raises(CDROMError, match="did not report status"):
         backend.list_drives()
+
+
+def test_mount_drive_handles_desktop_automount_race(monkeypatch, tmp_path):
+    mounted = tmp_path / "cd"
+    mounted.mkdir()
+    device = Path("/dev/sr0")
+    drive = [backend.OpticalDrive(0, device, "/discs/disc.cue")]
+    calls = []
+
+    def command(args):
+        calls.append(args)
+        # udisks loses the race, but the desktop has already mounted it.
+        drive[0] = backend.OpticalDrive(
+            0, device, "/discs/disc.cue", mounted
+        )
+        raise CDROMError("AlreadyMounted")
+
+    monkeypatch.setattr(backend, "list_drives", lambda: drive[:])
+    monkeypatch.setattr(backend, "_command", command)
+    assert backend.mount_drive(0).mountpoint == mounted
+    assert calls == [["udisksctl", "mount", "-b", "/dev/sr0"]]
+
+
+def test_mount_drive_retries_during_udisks_probe(monkeypatch, tmp_path):
+    mounted = tmp_path / "cd"
+    mounted.mkdir()
+    device = Path("/dev/sr0")
+    drive = [backend.OpticalDrive(0, device, "/discs/disc.cue")]
+    attempts = []
+
+    def command(args):
+        attempts.append(args)
+        if len(attempts) < 3:
+            raise CDROMError("No filesystem object yet")
+        drive[0] = backend.OpticalDrive(
+            0, device, "/discs/disc.cue", mounted
+        )
+        return ""
+
+    monkeypatch.setattr(backend, "list_drives", lambda: drive[:])
+    monkeypatch.setattr(backend, "_command", command)
+    monkeypatch.setattr(backend.time, "sleep", lambda seconds: None)
+    assert backend.mount_drive(0).mountpoint == mounted
+    assert len(attempts) == 3
+
+
+def test_mount_drive_times_out_instead_of_succeeding(monkeypatch):
+    drive = backend.OpticalDrive(
+        0, Path("/dev/sr0"), "/discs/disc.cue"
+    )
+    attempts = []
+
+    monkeypatch.setattr(backend, "list_drives", lambda: [drive])
+    monkeypatch.setattr(backend.time, "sleep", lambda seconds: None)
+
+    def command(args):
+        attempts.append(args)
+        raise CDROMError("Not ready")
+
+    monkeypatch.setattr(backend, "_command", command)
+    with pytest.raises(CDROMError, match="Not ready"):
+        backend.mount_drive(0)
+    assert len(attempts) == 10
+
