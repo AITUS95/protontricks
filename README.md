@@ -116,22 +116,23 @@ to be entered manually.
    `protontricks --gui`. Select the **same Steam installer shortcut**, then
    choose **Manage CD/DVD drives (CDEmu)**.
 4. Select the Windows drive letter required by the installer (usually `D:`).
-   Choose an existing CDEmu reader and use **Load or replace CD/DVD image**
-   (the native image picker), **Mount loaded disc**, **Unmount disc
-   filesystem**, **Eject disc image**, or **Map mounted disc to D:**.
-5. When an image is loaded or mounted, Protontricks also updates the chosen
-   prefix's `d:` mountpoint and `d::` raw device links. Return to the
-   installer and click **Retry/OK**. Repeat for each requested disc.
+   The main menu lists the CDEmu readers plus **Add virtual reader** (and
+   **Remove last virtual reader** when applicable). Selecting a reader
+   offers only **Load or replace disc image** (native image picker),
+   **Eject disc**, **Map disc to D:** and **Back**.
+5. **Load or replace disc image** loads, mounts and maps the disc to the
+   chosen letter (`d:` mountpoint and `d::` raw device links) in one step.
+   **Map disc to D:** mounts a loaded disc if needed before mapping it.
+   Return to the installer and click **Retry/OK**. Repeat for each disc.
 6. **If Disc 1 cannot be unmounted because the running installer keeps files
    open** ("target is busy"), Protontricks never forces the unmount. After
-   **Load or replace CD/DVD image** it offers to load the new disc into an
+   **Load or replace disc image** it offers to load the new disc into an
    **empty reader** instead (creating one if none is free) and maps the
    installer's Windows letter (usually `D:`) to it. Disc 1 stays mounted
-   until the installer exits; eject it afterwards.
-7. The manager records readers it creates in the selected prefix so
-   **Remove last reader created for this game** only applies to its own last,
-   empty, unmapped reader. Use **Restore original D: mapping** to undo
-   Protontricks's Wine symlink changes when appropriate.
+   until the installer exits; eject it afterwards with **Eject disc**.
+7. The manager records readers it creates in the selected prefix, so
+   **Remove last virtual reader** only appears for its own last reader, and
+   only removes it when it is empty and no longer mapped in Wine.
 
 **Compatibility:** If CDEmu is not installed, `protontricks --gui` goes
 directly to the normal Winetricks GUI without the extra action dialog.
