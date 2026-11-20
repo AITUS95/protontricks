@@ -116,8 +116,8 @@ to be entered manually.
    `protontricks --gui`. Select the **same Steam installer shortcut**, then
    choose **Manage CD/DVD drives (CDEmu)**.
 4. Select the Windows drive letter required by the installer (usually `D:`).
-   The main menu lists the CDEmu readers plus **Add virtual reader** (and
-   **Remove last virtual reader** when applicable). Selecting a reader
+   The main menu lists the CDEmu readers plus **Add virtual reader** and
+   **Remove last virtual reader (reader N)**. Selecting a reader
    offers only **Load or replace disc image** (native image picker),
    **Eject disc**, **Map disc to D:** and **Back**.
 5. **Load or replace disc image** loads, mounts and maps the disc to the
@@ -130,9 +130,10 @@ to be entered manually.
    **empty reader** instead (creating one if none is free) and maps the
    installer's Windows letter (usually `D:`) to it. Disc 1 stays mounted
    until the installer exits; eject it afterwards with **Eject disc**.
-7. The manager records readers it creates in the selected prefix, so
-   **Remove last virtual reader** only appears for its own last reader, and
-   only removes it when it is empty and no longer mapped in Wine.
+7. **Remove last virtual reader** removes any empty last reader, including
+   readers created outside Protontricks. CDEmu can only remove its **last**
+   reader, and a reader still holding a disc image must be emptied with
+   **Eject disc** first.
 
 **Compatibility:** If CDEmu is not installed, `protontricks --gui` goes
 directly to the normal Winetricks GUI without the extra action dialog.
@@ -143,14 +144,13 @@ resources**, not game-specific resources. Adding, removing, ejecting and
 unmounting a reader can affect unrelated applications. Destructive actions
 require confirmation and regular unmounting (never forced); a busy device
 will not be forcibly ejected. `cdemu remove-device` can remove **only the
-last reader**. The UI refuses to remove readers it did not create for the
-selected game, readers with loaded images, and readers still referenced by
-the game's Wine raw device links. It does not automatically delete global
-readers when the game is removed.
+last reader**, and the UI refuses to remove it while it holds a disc image.
+It does not automatically delete global readers when the game is removed.
 
-**Per-game scope:** Only Wine drive mappings and reader ownership records
-are stored in the game's Proton prefix. Original mappings can be restored;
-regular files and mappings changed externally are not silently overwritten.
+**Per-game scope:** Only the Wine drive mappings (and a backup of the
+original ones, under `.protontricks-cdrom` in the prefix) are stored in the
+game's Proton prefix. Regular files and mappings changed externally are not
+silently overwritten.
 
 **Limitations:** The GUI does not emulate optical drives itself and depends
 on the installed CDEmu daemon and udisks. Some older installers may cache
