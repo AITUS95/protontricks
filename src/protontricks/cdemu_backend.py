@@ -4,13 +4,12 @@ CDEmu readers are global. Only the drive-letter mapping is game-specific.
 No commands run through a shell and no privileged/forced unmounts are used.
 """
 import json
-import os
 import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .cdrom import CDROMError, CDEmuDrive, _command, _paths, _save_state
+from .cdrom import CDROMError, CDEmuDrive, _command
 
 
 @dataclass(frozen=True)
@@ -222,40 +221,8 @@ def load_image(slot, image_path, replace=False):
     return mount_drive(slot)
 
 
-def _owned_file(prefix):
-    # Leverage the same validated per-prefix location as mapping backups.
-    _, link_state = _paths(prefix, "D")
-    return link_state.parent / "owned-devices.json"
-
-
-def get_owned_drives(prefix):
-    path = _owned_file(prefix)
-    if path.is_symlink() or path.parent.is_symlink():
-        raise CDROMError("Unsafe CDEmu ownership file location.")
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        entries = data["devices"]
-        if not isinstance(entries, list) or not all(
-            isinstance(entry, dict) and type(entry.get("slot")) is int
-            and isinstance(entry.get("device"), str)
-            and entry["slot"] >= 0
-            for entry in entries
-        ):
-            raise ValueError("Invalid reader ownership records")
-        return entries
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise CDROMError("Invalid CDEmu ownership record.") from exc
-
-
-def _save_owned(prefix, entries):
-    _save_state(_owned_file(prefix), {"devices": entries})
-
-
-def add_drive(prefix):
-    """Create a global CDEmu reader, recording it under this game prefix."""
-    owned = get_owned_drives(prefix)
+def add_drive():
+    """Create a system-wide CDEmu reader and return it."""
     before = {drive.slot for drive in list_drives()}
     _command(["cdemu", "add-device"])
     new = []
@@ -267,58 +234,32 @@ def add_drive(prefix):
     if len(new) != 1:
         raise CDROMError(
             "CDEmu add-device completed, but the new reader could not be "
-            "identified. Refresh; do not add another reader yet."
+            "identified. Reopen the manager before adding another reader."
         )
-    drive = new[0]
-    try:
-        _save_owned(prefix, owned + [{
-            "slot": drive.slot, "device": str(drive.device)
-        }])
-    except Exception:
-        # Never delete a global reader automatically when persistence fails.
-        raise CDROMError(
-            "The reader was created but ownership could not be saved; "
-            "leave it in place and inspect it manually."
-        )
-    return drive
+    return new[0]
 
 
-def remove_drive(prefix, slot):
-    """Only remove the last, empty reader created for this game.
+def remove_drive(slot):
+    """Remove the last CDEmu reader, but only while it holds no image.
 
-    CDEmu remove-device always removes the LAST device globally. Refuse to
-    remove arbitrary devices or a device still referenced by this prefix.
+    "cdemu remove-device" always removes the LAST reader, so any other
+    slot is refused. Readers with a loaded or mounted image must be
+    ejected first.
     """
     drives = list_drives()
     if not drives or drives[-1].slot != slot:
-        raise CDROMError("Only CDEmu's last reader can be removed.")
-    drive = drives[-1]
-    owned = get_owned_drives(prefix)
-    if {"slot": slot, "device": str(drive.device)} not in owned:
         raise CDROMError(
-            "This reader was not created by Protontricks for this game."
-        )
-    if drive.loaded or drive.mountpoint is not None:
-        raise CDROMError("Eject the image before removing this reader.")
-    dosdevices = Path(prefix) / "dosdevices"
-    for link in dosdevices.iterdir():
-        if link.name.endswith("::") and link.is_symlink() and \
-                os.readlink(link) == str(drive.device):
-            raise CDROMError(
-                "This reader is still mapped in Wine. Restore or change "
-                "the mapping before removing it."
+            "CDEmu can only remove its last reader (reader {}).".format(
+                drives[-1].slot if drives else "-"
             )
-    remaining = [entry for entry in owned if entry != {
-        "slot": slot, "device": str(drive.device)
-    }]
-    # Retire the ownership record first: a failed write must not leave a
-    # stale record that could authorize removal of a newly reused slot.
-    _save_owned(prefix, remaining)
-    try:
-        _command(["cdemu", "remove-device"])
-    except Exception:
-        _save_owned(prefix, owned)
-        raise
+        )
+    drive = drives[-1]
+    if drive.loaded or drive.mountpoint is not None:
+        raise CDROMError(
+            "Reader {} still holds a disc image. Eject the disc before "
+            "removing the reader.".format(slot)
+        )
+    _command(["cdemu", "remove-device"])
     return drive
 
 

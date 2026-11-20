@@ -15,8 +15,7 @@ from PIL import Image
 from .cdrom import CDROMError, set_cdrom_mapping
 from .cdemu_backend import (
     DeviceBusyError, add_drive, eject_drive, find_empty_drive,
-    get_owned_drives, list_drives, load_image, mount_drive, remove_drive,
-    to_cdrom_drive
+    list_drives, load_image, mount_drive, remove_drive, to_cdrom_drive
 )
 from .config import get_config
 from .flatpak import get_inaccessible_paths
@@ -630,7 +629,7 @@ def _load_into_spare_reader(prefix, busy_slot, image_path, letter):
             "it?".format(Path(image_path).name, letter)
         ):
             return None
-        spare = add_drive(prefix)
+        spare = add_drive()
     elif not _confirm_cdrom_action(
         busy_message + "Load {} into empty reader {} instead and map {}: "
         "to it?".format(Path(image_path).name, spare.slot, letter)
@@ -646,8 +645,7 @@ def manage_cdrom_drives_gui(prefix, game_name):
     The menus are intentionally minimal: add or remove a virtual reader,
     load (or replace) an image, eject it, and map a disc to the selected
     Windows drive letter. Images and readers are system-wide; only the
-    dosdevices links and the record of readers created here are stored in
-    the selected prefix.
+    dosdevices links (and their backup) are stored in the selected prefix.
     """
     try:
         selected_letter = _choose_from_list(
@@ -667,7 +665,6 @@ def manage_cdrom_drives_gui(prefix, game_name):
     while True:
         try:
             drives = list_drives()
-            owned = get_owned_drives(prefix)
         except (CDROMError, OSError) as exc:
             _cdrom_error_dialog(exc)
             return
@@ -676,14 +673,11 @@ def manage_cdrom_drives_gui(prefix, game_name):
         for drive in drives:
             actions[_drive_label(drive)] = ("reader", drive.slot)
         actions["Add virtual reader"] = ("add", None)
-        # Only the last reader created by this manager for this game can be
-        # removed safely ("cdemu remove-device" always removes the last one).
-        if drives and {
-            "slot": drives[-1].slot, "device": str(drives[-1].device)
-        } in owned:
-            actions["Remove last virtual reader"] = (
-                "remove", drives[-1].slot
-            )
+        # "cdemu remove-device" can only remove the last reader.
+        if drives:
+            actions["Remove last virtual reader (reader {})".format(
+                drives[-1].slot
+            )] = ("remove", drives[-1].slot)
 
         try:
             selection = _choose_from_list(
@@ -708,16 +702,26 @@ def manage_cdrom_drives_gui(prefix, game_name):
                     "Add a CDEmu virtual reader? This changes the system-"
                     "wide CDEmu device list, not only this Proton game."
                 ):
-                    add_drive(prefix)
+                    add_drive()
                 continue
 
             if operation == "remove":
+                last = next(
+                    (item for item in list_drives() if item.slot == slot),
+                    None
+                )
+                if last is not None and (
+                        last.loaded or last.mountpoint is not None):
+                    raise CDROMError(
+                        "Reader {} still holds a disc image. Eject the "
+                        "disc before removing the reader.".format(slot)
+                    )
                 if _confirm_cdrom_action(
-                    "Remove the last CDEmu virtual reader? This is a "
-                    "system-wide change. Only an empty reader created "
-                    "by this game's manager can be removed."
+                    "Remove virtual reader {}? This changes the "
+                    "system-wide CDEmu device list, not only this "
+                    "Proton game.".format(slot)
                 ):
-                    remove_drive(prefix, slot)
+                    remove_drive(slot)
                 continue
 
             drive = next(
