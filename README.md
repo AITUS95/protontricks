@@ -129,7 +129,10 @@ needed) and maps `D:` to it. Eject Disc 1 once the installer has finished.
 CDEmu readers and images are **system-wide**: adding, removing or ejecting
 them affects every application. Only the drive mappings, plus a backup of
 the original links under `.protontricks-cdrom`, are stored in the game's
-prefix; mappings changed by other programs are never overwritten. Some
+prefix; regular files are never overwritten. Wine itself may add or remove
+these links when a disc is mounted or unmounted, so map the disc again after
+a swap if needed. If no reader shows a `/dev/sr` device, load the `vhba`
+kernel module (`sudo modprobe vhba`). Some
 installers may still cache drive information or use copy protection that
 remapping a drive letter cannot work around.
 

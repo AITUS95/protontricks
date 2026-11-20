@@ -68,18 +68,24 @@ def test_refuse_to_overwrite_regular_file(prefix, tmp_path):
     assert (prefix / "dosdevices" / "d:").read_text() == "keep"
 
 
-def test_detect_external_changes(prefix, tmp_path):
-    mounted = tmp_path / "disc"
-    mounted.mkdir()
-    drive = CDEmuDrive(0, Path("/dev/sr0"), mounted)
-    set_cdrom_mapping(prefix, drive)
-    link = prefix / "dosdevices" / "d:"
-    link.unlink()
-    link.symlink_to("/external/change")
+def test_relink_after_wine_changes_or_removes_links(prefix, tmp_path):
+    """Wine's mount manager drops d: when a disc is unmounted."""
+    disc1 = tmp_path / "VTMB_1"
+    disc2 = tmp_path / "VTMB_2"
+    disc1.mkdir()
+    disc2.mkdir()
+    dos = prefix / "dosdevices"
+    (dos / "d:").symlink_to(str(disc1))
+    (dos / "d::").symlink_to("/dev/sr0")
+    set_cdrom_mapping(prefix, CDEmuDrive(1, Path("/dev/sr1"), disc2))
+    (dos / "d:").unlink()
 
-    with pytest.raises(CDROMError, match="outside Protontricks"):
-        set_cdrom_mapping(prefix, drive)
-    assert os.readlink(link) == "/external/change"
+    set_cdrom_mapping(prefix, CDEmuDrive(1, Path("/dev/sr1"), disc2))
+    assert os.readlink(dos / "d:") == str(disc2)
+    assert os.readlink(dos / "d::") == "/dev/sr1"
+    # The backup still holds the links found before the first mapping.
+    backup = (prefix / ".protontricks-cdrom" / "d.json").read_text()
+    assert str(disc1) in backup and "/dev/sr0" in backup
 
 
 def test_mapping_is_per_prefix(prefix, tmp_path):
