@@ -559,10 +559,6 @@ class TestCDROMGUI:
             "protontricks.gui.get_owned_drives", lambda prefix: []
         )
         monkeypatch.setattr(
-            "protontricks.gui.has_cdrom_backup",
-            lambda *args: False
-        )
-        monkeypatch.setattr(
             "protontricks.gui._cdrom_error_dialog",
             lambda message: errors.append(str(message))
         )
@@ -597,7 +593,7 @@ class TestCDROMGUI:
         cue.touch()
         drive = OpticalDrive(1, Path("/dev/sr1"), str(cue), mounted)
         responses = iter([
-            "D:", _drive_label(drive), "Load or replace CD/DVD image", None
+            "D:", _drive_label(drive), "Load or replace disc image", None
         ])
         actions = []
         monkeypatch.setattr(
@@ -611,10 +607,6 @@ class TestCDROMGUI:
         monkeypatch.setattr(
             "protontricks.gui.get_owned_drives",
             lambda prefix_path: []
-        )
-        monkeypatch.setattr(
-            "protontricks.gui.has_cdrom_backup",
-            lambda *args: False
         )
         monkeypatch.setattr(
             "protontricks.gui._select_disc_image", lambda: cue
@@ -651,8 +643,8 @@ class TestCDROMGUI:
         drives = []
         owned = []
         choices = iter([
-            "D:", "Add virtual reader (system-wide)",
-            "Remove last reader created for this game", None
+            "D:", "Add virtual reader",
+            "Remove last virtual reader", None
         ])
         calls = []
 
@@ -666,10 +658,6 @@ class TestCDROMGUI:
         monkeypatch.setattr(
             "protontricks.gui.get_owned_drives",
             lambda path: list(owned)
-        )
-        monkeypatch.setattr(
-            "protontricks.gui.has_cdrom_backup",
-            lambda *args: False
         )
         monkeypatch.setattr(
             "protontricks.gui._confirm_cdrom_action",
@@ -715,7 +703,7 @@ class TestCDROMBusyDiscFallback:
         disc2.touch()
         responses = iter([
             "D:", _drive_label(drives[0]),
-            "Load or replace CD/DVD image", None
+            "Load or replace disc image", None
         ])
         calls = []
         answers = iter(answers) if answers is not None else None
@@ -757,9 +745,6 @@ class TestCDROMBusyDiscFallback:
         )
         monkeypatch.setattr(
             "protontricks.gui.get_owned_drives", lambda path: []
-        )
-        monkeypatch.setattr(
-            "protontricks.gui.has_cdrom_backup", lambda *args: False
         )
         monkeypatch.setattr(
             "protontricks.gui._select_disc_image", lambda: disc2
@@ -834,3 +819,68 @@ class TestCDROMBusyDiscFallback:
 
         actions = [call for call in calls if call[0] != "confirm"]
         assert actions == [("load", 0, disc2, True)]
+
+
+class TestCDROMMinimalMenus:
+    """The manager only offers what is needed to swap discs."""
+
+    def _run(self, monkeypatch, tmp_path, drive, choices):
+        from protontricks.gui import manage_cdrom_drives_gui
+
+        prefix = tmp_path / "pfx"
+        (prefix / "dosdevices").mkdir(parents=True)
+        menus = []
+        calls = []
+        choices = iter(choices)
+
+        def choose(title, prompt, rows):
+            menus.append(list(rows))
+            return next(choices)
+
+        monkeypatch.setattr("protontricks.gui._choose_from_list", choose)
+        monkeypatch.setattr("protontricks.gui.list_drives", lambda: [drive])
+        monkeypatch.setattr(
+            "protontricks.gui.get_owned_drives", lambda path: []
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.mount_drive",
+            lambda slot: calls.append(("mount", slot)) or OpticalDrive(
+                slot, drive.device, drive.image, tmp_path
+            )
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.set_cdrom_mapping",
+            lambda path, selected, letter: calls.append(
+                ("map", selected.slot, letter)
+            )
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._cdrom_error_dialog",
+            lambda message: calls.append(("error", str(message)))
+        )
+        manage_cdrom_drives_gui(prefix, "Fake game")
+        return menus, calls
+
+    def test_menus_only_offer_disc_swap_actions(self, monkeypatch, tmp_path):
+        from protontricks.gui import _drive_label
+
+        drive = OpticalDrive(0, Path("/dev/sr0"))
+        menus, _ = self._run(
+            monkeypatch, tmp_path, drive,
+            ["E:", _drive_label(drive), "Back", None]
+        )
+        assert menus[1] == [_drive_label(drive), "Add virtual reader"]
+        assert menus[2] == [
+            "Load or replace disc image", "Eject disc", "Map disc to E:",
+            "Back"
+        ]
+
+    def test_map_mounts_a_loaded_disc_first(self, monkeypatch, tmp_path):
+        from protontricks.gui import _drive_label
+
+        drive = OpticalDrive(1, Path("/dev/sr1"), "/disc2.iso")
+        _, calls = self._run(
+            monkeypatch, tmp_path, drive,
+            ["D:", _drive_label(drive), "Map disc to D:", None]
+        )
+        assert calls == [("mount", 1), ("map", 1, "D")]
