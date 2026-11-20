@@ -76,7 +76,9 @@ def list_drives():
 def _selected_drive(slot):
     drive = next((d for d in list_drives() if d.slot == slot), None)
     if drive is None:
-        raise CDROMError("CDEmu reader {} no longer exists. Refresh.".format(slot))
+        raise CDROMError(
+            "CDEmu reader {} no longer exists. Refresh.".format(slot)
+        )
     return drive
 
 
@@ -140,7 +142,9 @@ def load_image(slot, image_path, replace=False):
     path = path.resolve()
     old = _selected_drive(slot)
     if old.loaded and not replace:
-        raise CDROMError("Reader {} is not empty; eject it first.".format(slot))
+        raise CDROMError(
+            "Reader {} is not empty; eject it first.".format(slot)
+        )
     if old.loaded:
         eject_drive(slot)
     try:
