@@ -129,3 +129,70 @@ def test_invalid_drive_letter(prefix, tmp_path):
         set_cdrom_mapping(
             prefix, CDEmuDrive(0, Path("/dev/sr0"), mounted), "C"
         )
+
+
+def test_command_reports_missing_tool(monkeypatch):
+    from protontricks import cdrom
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("cdemu")
+
+    monkeypatch.setattr(cdrom.subprocess, "run", missing)
+    with pytest.raises(CDROMError, match="cdemu-client"):
+        cdrom._command(["cdemu", "status"])
+
+
+def test_command_reports_failing_tool(monkeypatch):
+    from protontricks import cdrom
+    from subprocess import CompletedProcess
+
+    def failed(args, **kwargs):
+        return CompletedProcess(args, 1, "", "D-Bus disconnected")
+
+    monkeypatch.setattr(cdrom.subprocess, "run", failed)
+    with pytest.raises(CDROMError, match="D-Bus disconnected"):
+        cdrom._command(["cdemu", "status"])
+
+
+def test_mapping_rollback_if_second_symlink_fails(
+        prefix, monkeypatch, tmp_path):
+    from protontricks import cdrom
+
+    dosdevices = prefix / "dosdevices"
+    (dosdevices / "d:").symlink_to("/old/mount")
+    (dosdevices / "d::").symlink_to("/dev/sr0")
+    mounted = tmp_path / "disc2"
+    mounted.mkdir()
+
+    original_symlink = cdrom.os.symlink
+
+    def fail_on_raw_device(target, destination, *args, **kwargs):
+        if str(destination).endswith("d::.protontricks-new"):
+            raise OSError("simulated write failure")
+        return original_symlink(target, destination, *args, **kwargs)
+
+    monkeypatch.setattr(cdrom.os, "symlink", fail_on_raw_device)
+    with pytest.raises(OSError, match="simulated write failure"):
+        set_cdrom_mapping(
+            prefix, CDEmuDrive(1, Path("/dev/sr1"), mounted)
+        )
+    assert os.readlink(dosdevices / "d:") == "/old/mount"
+    assert os.readlink(dosdevices / "d::") == "/dev/sr0"
+    assert not has_cdrom_backup(prefix)
+
+
+def test_stale_temp_backup_reports_path_and_restores_links(
+        prefix, tmp_path):
+    temporary = prefix / ".protontricks-cdrom" / "d.tmp"
+    temporary.parent.mkdir()
+    temporary.write_text("stale")
+    mounted = tmp_path / "disc"
+    mounted.mkdir()
+    with pytest.raises(CDROMError) as excinfo:
+        set_cdrom_mapping(
+            prefix, CDEmuDrive(1, Path("/dev/sr1"), mounted)
+        )
+    assert str(temporary) in str(excinfo.value)
+    assert not (prefix / "dosdevices" / "d:").is_symlink()
+    assert not (prefix / "dosdevices" / "d::").is_symlink()
+    assert temporary.read_text() == "stale"
