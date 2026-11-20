@@ -191,3 +191,16 @@ def test_failed_replace_attempts_to_restore_old_disc(monkeypatch, tmp_path):
     assert [c[:2] for c in calls][-2:] == [
         ["cdemu", "load"], ["udisksctl", "mount"]
     ]
+
+
+def test_missing_reader_status_is_not_treated_as_empty(monkeypatch):
+    def fake_command(args):
+        if args[:2] == ["cdemu", "device-mapping"]:
+            return "DEV SCSI CD-ROM SCSI generic\n0 /dev/sr0 /dev/sg1\n"
+        if args[:2] == ["cdemu", "status"]:
+            return "DEV LOADED FILENAME\n"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(backend, "_command", fake_command)
+    with pytest.raises(CDROMError, match="did not report status"):
+        backend.list_drives()
