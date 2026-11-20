@@ -268,3 +268,92 @@ def test_mount_drive_times_out_instead_of_succeeding(monkeypatch):
         backend.mount_drive(0)
     assert len(attempts) == 10
 
+
+def _async_unload_command(drive, image, mount, new_image, pending_polls):
+    """Fake CDEmu whose unload completes only after a few status polls."""
+    state = {"unloading": 0}
+    calls = []
+
+    def list_drives():
+        if state["unloading"]:
+            state["unloading"] -= 1
+            if not state["unloading"]:
+                drive[0] = backend.OpticalDrive(0, Path("/dev/sr0"))
+        return drive[:]
+
+    def command(args):
+        calls.append(args)
+        if args[:2] == ["udisksctl", "unmount"]:
+            drive[0] = backend.OpticalDrive(0, Path("/dev/sr0"), image)
+        elif args[:2] == ["cdemu", "unload"]:
+            state["unloading"] = pending_polls
+        elif args[:2] == ["cdemu", "load"]:
+            if drive[0].loaded:
+                raise CDROMError(
+                    "cdemu failed: ERROR: Failed to load image: "
+                    "net.sf.cdemu.CDEmuDaemon.errorDaemon.AlreadyLoaded: "
+                    "Device is already loaded! (36)"
+                )
+            drive[0] = backend.OpticalDrive(
+                0, Path("/dev/sr0"), args[-1]
+            )
+        elif args[:2] == ["udisksctl", "mount"]:
+            drive[0] = backend.OpticalDrive(
+                0, Path("/dev/sr0"), drive[0].image, mount
+            )
+        return ""
+
+    return list_drives, command, calls
+
+
+def test_eject_waits_for_asynchronous_unload(monkeypatch, tmp_path):
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    drive = [backend.OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso", mount)]
+    list_drives, command, _ = _async_unload_command(
+        drive, "/disc1.iso", mount, None, pending_polls=4
+    )
+    sleeps = []
+    monkeypatch.setattr(backend, "list_drives", list_drives)
+    monkeypatch.setattr(backend, "_command", command)
+    monkeypatch.setattr(backend.time, "sleep", sleeps.append)
+
+    assert backend.eject_drive(0).loaded is False
+    assert sleeps
+
+
+def test_eject_times_out_when_reader_stays_loaded(monkeypatch, tmp_path):
+    drive = [backend.OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso")]
+    monkeypatch.setattr(backend, "list_drives", lambda: drive[:])
+    monkeypatch.setattr(backend, "_command", lambda args: "")
+    monkeypatch.setattr(backend.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(CDROMError, match="still reports a loaded disc"):
+        backend.eject_drive(0)
+
+
+def test_replace_disc_waits_for_unload_before_loading(
+        monkeypatch, tmp_path):
+    """Regression: Disc 1 -> Disc 2 failed with CDEmu's AlreadyLoaded."""
+    disc1 = tmp_path / "disc1.iso"
+    disc2 = tmp_path / "disc2.iso"
+    disc1.write_bytes(b"1")
+    disc2.write_bytes(b"2")
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    drive = [backend.OpticalDrive(0, Path("/dev/sr0"), str(disc1), mount)]
+    list_drives, command, calls = _async_unload_command(
+        drive, str(disc1), mount, str(disc2), pending_polls=3
+    )
+    monkeypatch.setattr(backend, "list_drives", list_drives)
+    monkeypatch.setattr(backend, "_command", command)
+    monkeypatch.setattr(backend.time, "sleep", lambda seconds: None)
+
+    result = backend.load_image(0, disc2, replace=True)
+
+    assert result.image == str(disc2.resolve())
+    assert result.mountpoint == mount
+    assert [c[:2] for c in calls] == [
+        ["udisksctl", "unmount"], ["cdemu", "unload"],
+        ["cdemu", "load"], ["udisksctl", "mount"]
+    ]
