@@ -61,11 +61,13 @@ def list_drives():
             )
 
     result = []
+    mapped = set()
     for line in mapping.splitlines():
         match = re.match(r"^\s*(\d+)\s+(/dev/\S+)\s+", line)
         if not match:
             continue
         slot = int(match.group(1))
+        mapped.add(slot)
         if slot not in image_by_slot:
             raise CDROMError(
                 "CDEmu did not report status for reader {}.".format(slot)
@@ -88,6 +90,16 @@ def list_drives():
         result.append(OpticalDrive(
             slot, device, image_by_slot.get(slot, ""), mountpoint
         ))
+    unmapped = sorted(set(image_by_slot) - mapped)
+    if unmapped:
+        # CDEmu still lists the reader, but the kernel side is missing.
+        raise CDROMError(
+            "CDEmu reader {} has no /dev/sr device. The vhba kernel module "
+            "is probably not loaded: run \"sudo modprobe vhba\", then "
+            "\"killall cdemu-daemon\", and reopen the manager.".format(
+                ", ".join(str(slot) for slot in unmapped)
+            )
+        )
     return sorted(result, key=lambda d: d.slot)
 
 

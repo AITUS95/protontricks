@@ -118,22 +118,45 @@ def _load_state(path):
     return state
 
 
+def find_disc_letters(prefix, mountpoints):
+    """Return the prefix's drive letters that point to a mounted disc.
+
+    Wine assigns a letter (not always D:) to a disc mounted before the
+    installer starts, and the installer then looks for the next disc on
+    that same letter. Returns ``{letter: mountpoint}`` sorted by letter.
+    """
+    wanted = {str(Path(mountpoint)) for mountpoint in mountpoints}
+    found = {}
+    try:
+        links = list((Path(prefix) / "dosdevices").iterdir())
+    except OSError:
+        return found
+    for link in links:
+        name = link.name.lower()
+        if not (len(name) == 2 and name[1] == ":" and "d" <= name[0] <= "y"):
+            continue
+        if not link.is_symlink():
+            continue
+        target = os.readlink(link).rstrip("/")
+        if target in wanted:
+            found[name[0].upper()] = target
+    return dict(sorted(found.items()))
+
+
 def set_cdrom_mapping(prefix, drive, letter="D"):
     """Point a Windows letter and its raw-device link to a mounted disc.
 
     The original links are backed up once under .protontricks-cdrom in the
-    prefix. A mapping changed by Wine or another program is never clobbered.
+    prefix. Existing symlinks are replaced even if they changed since the
+    last mapping: Wine's mount manager itself adds and removes these links
+    when optical media is mounted or unmounted. Regular files are never
+    overwritten.
     """
     links, path = _paths(prefix, letter)
     if drive.mountpoint is None or not Path(drive.mountpoint).is_dir():
         raise CDROMError("Mount the disc before mapping it.")
     previous = _targets(links)
     state = _load_state(path)
-    if state and previous != state["current"]:
-        raise CDROMError(
-            "The {}: mapping was changed outside Protontricks; fix it "
-            "manually before continuing.".format(letter.upper())
-        )
     target = [str(drive.mountpoint), str(drive.device)]
     new_state = {
         "original": state["original"] if state else previous,

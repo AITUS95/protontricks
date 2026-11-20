@@ -12,7 +12,7 @@ from subprocess import PIPE, CalledProcessError, run
 
 from PIL import Image
 
-from .cdrom import CDROMError, set_cdrom_mapping
+from .cdrom import CDROMError, find_disc_letters, set_cdrom_mapping
 from .cdemu_backend import (
     DeviceBusyError, add_drive, eject_drive, find_empty_drive,
     is_removable_slot, list_drives, load_image, mount_drive, remove_drive
@@ -639,6 +639,41 @@ def _load_into_spare_reader(prefix, busy_slot, image_path, letter):
     return load_image(spare.slot, image_path)
 
 
+def _drive_letter_choices(prefix, game_name):
+    """Build the drive letter prompt, listing letters Wine gave a disc first.
+
+    An installer started from a disc mounted outside Protontricks runs from
+    the letter Wine assigned to that disc (for example K:), and it asks for
+    the next disc on that same letter.
+    """
+    try:
+        mounted = [
+            drive.mountpoint for drive in list_drives()
+            if drive.mountpoint is not None
+        ]
+    except CDROMError:
+        mounted = []
+    detected = find_disc_letters(prefix, mounted)
+    rows = [
+        "{}: - {} (disc already mapped by Wine)".format(
+            letter, Path(target).name
+        )
+        for letter, target in detected.items()
+    ]
+    rows += [
+        "{}:".format(chr(number)) for number in range(ord("D"), ord("Z"))
+        if chr(number) not in detected
+    ]
+    prompt = "Choose the Windows drive letter for " + game_name
+    if detected:
+        prompt += (
+            ".\nAn installer started from a mounted disc looks for the next "
+            "disc on the letter Wine gave it: choose " +
+            ", ".join("{}:".format(letter) for letter in detected) + "."
+        )
+    return prompt, rows
+
+
 def manage_cdrom_drives_gui(prefix, game_name):
     """Swap CD/DVD images for one game's Proton prefix with CDEmu.
 
@@ -650,12 +685,11 @@ def manage_cdrom_drives_gui(prefix, game_name):
     try:
         selected_letter = _choose_from_list(
             "Protontricks CD/DVD Manager",
-            "Choose the Windows drive letter for " + game_name,
-            [f"{chr(number)}:" for number in range(ord("D"), ord("Z"))]
+            *_drive_letter_choices(prefix, game_name)
         )
         if selected_letter is None:
             return
-        letter = selected_letter.rstrip(":")
+        letter = selected_letter.split(":")[0].strip()
         if len(letter) != 1 or not ("D" <= letter <= "Y"):
             raise CDROMError("Invalid Windows drive letter.")
     except (CDROMError, OSError, RuntimeError, ValueError) as exc:

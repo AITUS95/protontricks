@@ -467,3 +467,20 @@ def test_command_reports_failing_tool(monkeypatch):
     monkeypatch.setattr(backend.subprocess, "run", failed)
     with pytest.raises(CDROMError, match="D-Bus disconnected"):
         backend._command(["cdemu", "status"])
+
+
+def test_reader_without_kernel_device_reports_vhba(monkeypatch):
+    """CDEmu can list a reader whose /dev/sr device is missing."""
+    def command(args):
+        if args[:2] == ["cdemu", "device-mapping"]:
+            return (
+                "Device mapping:\nDEV   SCSI CD-ROM     SCSI generic\n"
+                "0                                    \n"
+            )
+        if args[:2] == ["cdemu", "status"]:
+            return "Devices' status:\nDEV   LOADED     FILENAME\n0     False\n"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(backend, "_command", command)
+    with pytest.raises(CDROMError, match="modprobe vhba"):
+        backend.list_drives()
