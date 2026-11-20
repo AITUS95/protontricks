@@ -146,3 +146,48 @@ def test_external_mount_failure_does_not_force_eject(
     assert seen == [
         ["udisksctl", "unmount", "-b", "/dev/sr0"]
     ]
+
+
+def test_failed_replace_attempts_to_restore_old_disc(monkeypatch, tmp_path):
+    old_file = tmp_path / "old.iso"
+    new_file = tmp_path / "bad.iso"
+    old_file.write_bytes(b"old")
+    new_file.write_bytes(b"bad")
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    drive = [backend.OpticalDrive(
+        0, Path("/dev/sr0"), str(old_file), mount
+    )]
+    calls = []
+
+    def fake_command(args):
+        calls.append(args)
+        if args[:2] == ["udisksctl", "unmount"]:
+            drive[0] = backend.OpticalDrive(
+                0, Path("/dev/sr0"), str(old_file)
+            )
+        elif args[:2] == ["cdemu", "unload"]:
+            drive[0] = backend.OpticalDrive(
+                0, Path("/dev/sr0")
+            )
+        elif args[:2] == ["cdemu", "load"]:
+            if args[-1] == str(new_file):
+                raise CDROMError("Broken disc image")
+            drive[0] = backend.OpticalDrive(
+                0, Path("/dev/sr0"), str(old_file)
+            )
+        elif args[:2] == ["udisksctl", "mount"]:
+            drive[0] = backend.OpticalDrive(
+                0, Path("/dev/sr0"), str(old_file), mount
+            )
+        return ""
+
+    monkeypatch.setattr(backend, "list_drives", lambda: drive[:])
+    monkeypatch.setattr(backend, "_command", fake_command)
+    with pytest.raises(CDROMError, match="Broken disc image"):
+        backend.load_image(0, new_file, replace=True)
+    assert drive[0].image == str(old_file)
+    assert drive[0].mountpoint == mount
+    assert [c[:2] for c in calls][-2:] == [
+        ["cdemu", "load"], ["udisksctl", "mount"]
+    ]
