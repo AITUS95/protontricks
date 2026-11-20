@@ -24,9 +24,15 @@ def test_discover_mounted_cdemu_discs(monkeypatch, tmp_path):
 
     def command(args):
         if args[:2] == ["cdemu", "device-mapping"]:
-            return "Device mapping:\nDEV   SCSI CD-ROM   SCSI generic\n0 /dev/sr0 /dev/sg1\n1 /dev/sr1 /dev/sg2\n"
+            return (
+                "Device mapping:\nDEV   SCSI CD-ROM   SCSI generic\n"
+                "0 /dev/sr0 /dev/sg1\n1 /dev/sr1 /dev/sg2\n"
+            )
         if args[:2] == ["cdemu", "status"]:
-            return "Devices' status:\nDEV LOADED FILENAME\n0 True /discs/one.cue\n1 True /discs/two.cue\n"
+            return (
+                "Devices' status:\nDEV LOADED FILENAME\n"
+                "0 True /discs/one.cue\n1 True /discs/two.cue\n"
+            )
         if args[0] == "findmnt":
             if args[3] == "/dev/sr1":
                 return json.dumps({"filesystems": [{"target": str(disc)}]})
