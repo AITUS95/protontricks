@@ -483,7 +483,9 @@ class TestCDROMGUI:
     def test_action_selection(self, gui_provider, home_dir):
         from protontricks.gui import select_gui_action
 
-        (home_dir / ".local" / "bin" / "cdemu").touch()
+        cdemu = home_dir / ".local" / "bin" / "cdemu"
+        cdemu.touch()
+        cdemu.chmod(0o744)
         gui_provider.mock_stdout = "Manage CD/DVD drives (CDEmu)|\n"
         assert select_gui_action() == "cdrom"
         assert "--separator" in gui_provider.args
