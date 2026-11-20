@@ -357,3 +357,78 @@ def test_replace_disc_waits_for_unload_before_loading(
         ["udisksctl", "unmount"], ["cdemu", "unload"],
         ["cdemu", "load"], ["udisksctl", "mount"]
     ]
+
+
+BUSY_ERROR = (
+    "udisksctl failed: Error unmounting /dev/sr0: "
+    "GDBus.Error:org.freedesktop.UDisks2.Error.DeviceBusy: "
+    "Error unmounting /dev/sr0: target is busy"
+)
+
+
+def test_busy_unmount_raises_device_busy_error(monkeypatch, tmp_path):
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    drive = backend.OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso", mount)
+
+    def command(args):
+        raise CDROMError(BUSY_ERROR)
+
+    monkeypatch.setattr(backend, "list_drives", lambda: [drive])
+    monkeypatch.setattr(backend, "_command", command)
+
+    with pytest.raises(backend.DeviceBusyError, match="still using"):
+        backend.unmount_drive(0)
+
+
+def test_other_unmount_errors_are_not_reported_as_busy(monkeypatch, tmp_path):
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    drive = backend.OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso", mount)
+
+    def command(args):
+        raise CDROMError("udisksctl failed: Not authorized")
+
+    monkeypatch.setattr(backend, "list_drives", lambda: [drive])
+    monkeypatch.setattr(backend, "_command", command)
+
+    with pytest.raises(CDROMError) as excinfo:
+        backend.unmount_drive(0)
+    assert not isinstance(excinfo.value, backend.DeviceBusyError)
+
+
+def test_busy_replace_leaves_current_disc_untouched(monkeypatch, tmp_path):
+    disc1 = tmp_path / "disc1.iso"
+    disc2 = tmp_path / "disc2.iso"
+    disc1.write_bytes(b"1")
+    disc2.write_bytes(b"2")
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    drive = backend.OpticalDrive(0, Path("/dev/sr0"), str(disc1), mount)
+    calls = []
+
+    def command(args):
+        calls.append(args)
+        if args[:2] == ["udisksctl", "unmount"]:
+            raise CDROMError(BUSY_ERROR)
+        return ""
+
+    monkeypatch.setattr(backend, "list_drives", lambda: [drive])
+    monkeypatch.setattr(backend, "_command", command)
+
+    with pytest.raises(backend.DeviceBusyError):
+        backend.load_image(0, disc2, replace=True)
+    # Nothing was unloaded or loaded: Disc 1 stays usable by the installer.
+    assert [c[:2] for c in calls] == [["udisksctl", "unmount"]]
+
+
+def test_find_empty_drive_skips_busy_and_loaded_readers(monkeypatch):
+    drives = [
+        backend.OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso"),
+        backend.OpticalDrive(1, Path("/dev/sr1"), "/other.iso"),
+        backend.OpticalDrive(2, Path("/dev/sr2")),
+    ]
+    monkeypatch.setattr(backend, "list_drives", lambda: drives[:])
+
+    assert backend.find_empty_drive(exclude_slot=0).slot == 2
+    assert backend.find_empty_drive(exclude_slot=2) is None

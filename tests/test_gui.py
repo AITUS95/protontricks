@@ -10,6 +10,7 @@ from PIL import Image
 from protontricks.gui import (prompt_filesystem_access,
                               select_steam_app_with_gui,
                               select_steam_installation)
+from protontricks.cdemu_backend import OpticalDrive
 from protontricks.steam import SteamApp
 
 
@@ -699,3 +700,137 @@ class TestCDROMGUI:
 
         gui_provider.returncode = 1
         assert _select_disc_image() is None
+
+
+class TestCDROMBusyDiscFallback:
+    """Disc swaps while the installer started from Disc 1 is running."""
+
+    def _setup(self, monkeypatch, tmp_path, drives, answers=None):
+        from protontricks.cdemu_backend import DeviceBusyError
+        from protontricks.gui import _drive_label
+
+        prefix = tmp_path / "pfx"
+        (prefix / "dosdevices").mkdir(parents=True)
+        disc2 = tmp_path / "Disc 2.iso"
+        disc2.touch()
+        responses = iter([
+            "D:", _drive_label(drives[0]),
+            "Load or replace CD/DVD image", None
+        ])
+        calls = []
+        answers = iter(answers) if answers is not None else None
+
+        def confirm(message):
+            calls.append(("confirm", message))
+            return next(answers) if answers is not None else True
+
+        def load_image(slot, image, replace=False):
+            calls.append(("load", slot, image, replace))
+            if slot == 0:
+                raise DeviceBusyError("Reader 0 is busy")
+            return OpticalDrive(
+                slot, Path("/dev/sr{}".format(slot)), str(image),
+                tmp_path
+            )
+
+        def add_drive(path):
+            drive = OpticalDrive(len(drives), Path(
+                "/dev/sr{}".format(len(drives))
+            ))
+            drives.append(drive)
+            calls.append(("add", path))
+            return drive
+
+        monkeypatch.setattr(
+            "protontricks.gui._choose_from_list",
+            lambda *args: next(responses)
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.list_drives", lambda: list(drives)
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.find_empty_drive",
+            lambda exclude_slot=None: next(
+                (d for d in drives
+                 if not d.loaded and d.slot != exclude_slot), None
+            )
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.get_owned_drives", lambda path: []
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.has_cdrom_backup", lambda *args: False
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._select_disc_image", lambda: disc2
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._confirm_cdrom_action", confirm
+        )
+        monkeypatch.setattr("protontricks.gui.load_image", load_image)
+        monkeypatch.setattr("protontricks.gui.add_drive", add_drive)
+        monkeypatch.setattr(
+            "protontricks.gui.set_cdrom_mapping",
+            lambda path, drive, letter: calls.append(
+                ("map", drive.slot, letter)
+            )
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._cdrom_error_dialog",
+            lambda message: calls.append(("error", str(message)))
+        )
+        return prefix, disc2, calls
+
+    def test_busy_disc_is_loaded_into_empty_reader(
+            self, monkeypatch, tmp_path):
+        from protontricks.gui import manage_cdrom_drives_gui
+
+        drives = [
+            OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso", tmp_path),
+            OpticalDrive(1, Path("/dev/sr1")),
+        ]
+        prefix, disc2, calls = self._setup(monkeypatch, tmp_path, drives)
+        manage_cdrom_drives_gui(prefix, "Fake game")
+
+        actions = [call for call in calls if call[0] != "confirm"]
+        assert actions == [
+            ("load", 0, disc2, True),
+            ("load", 1, disc2, False),
+            ("map", 1, "D")
+        ]
+        assert "empty reader 1" in calls[-3][1]
+
+    def test_busy_disc_without_spare_reader_adds_one(
+            self, monkeypatch, tmp_path):
+        from protontricks.gui import manage_cdrom_drives_gui
+
+        drives = [
+            OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso", tmp_path),
+        ]
+        prefix, disc2, calls = self._setup(monkeypatch, tmp_path, drives)
+        manage_cdrom_drives_gui(prefix, "Fake game")
+
+        actions = [call for call in calls if call[0] != "confirm"]
+        assert actions == [
+            ("load", 0, disc2, True),
+            ("add", prefix),
+            ("load", 1, disc2, False),
+            ("map", 1, "D")
+        ]
+
+    def test_busy_disc_fallback_can_be_cancelled(
+            self, monkeypatch, tmp_path):
+        from protontricks.gui import manage_cdrom_drives_gui
+
+        drives = [
+            OpticalDrive(0, Path("/dev/sr0"), "/disc1.iso", tmp_path),
+            OpticalDrive(1, Path("/dev/sr1")),
+        ]
+        # Accept replacing Disc 1, then decline the second-reader fallback.
+        prefix, disc2, calls = self._setup(
+            monkeypatch, tmp_path, drives, answers=[True, False]
+        )
+        manage_cdrom_drives_gui(prefix, "Fake game")
+
+        actions = [call for call in calls if call[0] != "confirm"]
+        assert actions == [("load", 0, disc2, True)]
