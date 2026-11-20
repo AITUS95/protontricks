@@ -123,11 +123,36 @@ def unmount_drive(slot):
     return drive
 
 
+# "cdemu unload" only emulates pressing the drive's eject button: it returns
+# before the kernel has released the medium, and loading another image while
+# the reader is still loaded fails with CDEmu's "AlreadyLoaded" error.
+UNLOAD_POLL_ATTEMPTS = 40
+UNLOAD_POLL_INTERVAL = 0.25
+
+
+def _wait_until_unloaded(slot):
+    """Wait until CDEmu reports the reader as empty after an unload."""
+    for attempt in range(UNLOAD_POLL_ATTEMPTS):
+        drive = _selected_drive(slot)
+        if not drive.loaded:
+            return drive
+        if attempt < UNLOAD_POLL_ATTEMPTS - 1:
+            time.sleep(UNLOAD_POLL_INTERVAL)
+    raise CDROMError(
+        "CDEmu reader {} still reports a loaded disc after the unload "
+        "request. The system may still be releasing it, or a running "
+        "program may be locking the drive. Try again in a few seconds, "
+        "or load the next disc into another reader.".format(slot)
+    )
+
+
 def eject_drive(slot):
+    """Unmount and unload a reader, waiting until the unload completes."""
     drive = unmount_drive(slot)
     if drive.loaded:
         _command(["cdemu", "unload", str(slot)])
-    return _selected_drive(slot)
+        return _wait_until_unloaded(slot)
+    return drive
 
 
 def load_image(slot, image_path, replace=False):
