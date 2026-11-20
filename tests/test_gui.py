@@ -493,31 +493,120 @@ class TestCDROMGUI:
         gui_provider.mock_stdout = ""
         assert select_gui_action() is None
 
-    def test_cdrom_drive_selected_and_repeated(self, monkeypatch, tmp_path):
-        from protontricks.cdrom import CDEmuDrive
+    def test_load_image_and_assign_to_selected_prefix(
+            self, monkeypatch, tmp_path):
+        from protontricks.cdemu_backend import OpticalDrive
+        from protontricks.gui import (
+            _drive_label, manage_cdrom_drives_gui
+        )
+        prefix = tmp_path / "pfx"
+        (prefix / "dosdevices").mkdir(parents=True)
+        mounted = tmp_path / "Disc 2"
+        mounted.mkdir()
+        cue = tmp_path / "Disc 2.cue"
+        cue.touch()
+        drive = OpticalDrive(1, Path("/dev/sr1"), str(cue), mounted)
+        responses = iter([
+            "D:", _drive_label(drive), "Load or replace CD/DVD image", None
+        ])
+        actions = []
+        monkeypatch.setattr(
+            "protontricks.gui._choose_from_list",
+            lambda *args: next(responses)
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.list_drives",
+            lambda: [drive]
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.get_owned_drives",
+            lambda prefix_path: []
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.has_cdrom_backup",
+            lambda *args: False
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._select_disc_image", lambda: cue
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._confirm_cdrom_action",
+            lambda *args: True
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.load_image",
+            lambda slot, image, replace: actions.append(
+                ("load", slot, image, replace)
+            ) or drive
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.set_cdrom_mapping",
+            lambda path, selected, letter: actions.append(
+                ("map", path, selected.slot, letter)
+            )
+        )
+
+        manage_cdrom_drives_gui(prefix, "Fake game")
+        assert actions == [
+            ("load", 1, cue, True),
+            ("map", prefix, 1, "D")
+        ]
+
+    def test_add_and_remove_reader_actions(self, monkeypatch, tmp_path):
+        from protontricks.cdemu_backend import OpticalDrive
         from protontricks.gui import manage_cdrom_drives_gui
 
         prefix = tmp_path / "pfx"
         (prefix / "dosdevices").mkdir(parents=True)
-        mount = tmp_path / "disc"
-        mount.mkdir()
-        drive = CDEmuDrive(1, Path("/dev/sr1"), mount, "Disc 2.cue")
-        selections = iter(["D:", "1: /dev/sr1 — " + str(mount) +
-                           " (Disc 2.cue)", None])
+        drives = []
+        owned = []
+        choices = iter([
+            "D:", "Add virtual reader (system-wide)",
+            "Remove last reader created for this game", None
+        ])
         calls = []
+
         monkeypatch.setattr(
             "protontricks.gui._choose_from_list",
-            lambda *args: next(selections)
+            lambda *args: next(choices)
         )
         monkeypatch.setattr(
-            "protontricks.gui.discover_cdemu_drives",
-            lambda: [drive]
+            "protontricks.gui.list_drives", lambda: list(drives)
         )
         monkeypatch.setattr(
-            "protontricks.gui.set_cdrom_mapping",
-            lambda prefix_path, current, letter:
-            calls.append((prefix_path, current, letter))
+            "protontricks.gui.get_owned_drives",
+            lambda path: list(owned)
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.has_cdrom_backup",
+            lambda *args: False
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._confirm_cdrom_action",
+            lambda *args: True
         )
 
+        def add_reader(path):
+            drive = OpticalDrive(0, Path("/dev/sr0"))
+            drives.append(drive)
+            owned.append({"slot": 0, "device": "/dev/sr0"})
+            calls.append(("add", path))
+            return drive
+
+        def remove_reader(path, slot):
+            calls.append(("remove", path, slot))
+            drives.pop()
+            return slot
+
+        monkeypatch.setattr("protontricks.gui.add_drive", add_reader)
+        monkeypatch.setattr("protontricks.gui.remove_drive", remove_reader)
         manage_cdrom_drives_gui(prefix, "Fake game")
-        assert calls == [(prefix, drive, "D")]
+        assert calls == [
+            ("add", prefix), ("remove", prefix, 0)
+        ]
+
+    def test_disc_image_picker_cancel(self, gui_provider):
+        from protontricks.gui import _select_disc_image
+
+        gui_provider.returncode = 1
+        assert _select_disc_image() is None
