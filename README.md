@@ -90,39 +90,58 @@ Protontricks supports `$STEAM_COMPAT_DATA_PATH` variable to set a custom path to
 
 [Wanna see Protontricks in action?](https://asciinema.org/a/229323)
 
-## Multi-disc CD/DVD installations (CDEmu)
+## Multi-disc CD/DVD manager (optional CDEmu integration)
 
-The Protontricks GUI includes an optional **Manage CD/DVD drives (CDEmu)**
-action after selecting a Steam game. It can switch the CD-ROM drive exposed
-to an installer running under Proton without requiring manual changes to
-`dosdevices` symlinks.
+The Protontricks GUI provides **Manage CD/DVD drives (CDEmu)** after
+selecting a Steam game or a non-Steam installer shortcut. The manager uses
+the *selected game's existing Proton prefix* automatically; no AppID needs
+to be entered manually.
 
-1. Install CDEmu and load your legally obtained ISO or BIN/CUE images.
-   Mount the loaded CDEmu discs using the desktop file manager or
-   `udisksctl` so the discs have filesystem mount points.
-2. Add the installer to Steam as a non-Steam game, force Proton, and launch
-   it at least once so that its Proton prefix exists.
-3. Run `protontricks --gui`, select the *installer's* Steam shortcut,
-   then choose **Manage CD/DVD drives (CDEmu)**.
-4. Select the Windows drive letter your installer expects (usually `D:`),
-   and the mounted CDEmu reader containing the current disc.
-5. When the installer asks for the next disc, leave it open, load and mount
-   the new disc (preferably in a separate CDEmu reader), then select that
-   reader in the manager. The same Windows letter is updated to point to
-   both the new mount path (`d:`) and its raw device (`d::`).
-6. To undo the changes, select **Restore original mapping** for that drive.
+### Requirements
 
-The manager stays open for additional disc changes until its list is closed.
-Only the selected game's Proton prefix is modified; original symlinks are
-recorded for restoration. Existing non-symlink entries and mappings modified
-outside this tool are never silently overwritten. No root privileges are
-required. CDEmu and `findmnt` must be available on the host.
+- CDEmu daemon and `cdemu-client` (`cdemu` command), configured and running.
+- `udisksctl` and `findmnt` available in the host environment.
+- A YAD or Zenity graphical dialog provider.
+- Access to the disc images and CD/DVD device files. In a Flatpak sandbox,
+  filesystem/device restrictions may prevent managing host CDEmu readers.
 
-**Limitations:** This helper does not load, unmount, or eject disc images
-itself. Some installers cache the original installation drive or validate
-physical discs using checks that a changed Wine mapping cannot satisfy.
-Launch the setup from the intended Windows CD-ROM letter when necessary.
-Access to CD devices and external mount paths may be restricted by Flatpak.
+### Workflow
+
+1. Add an installer to Steam, enable Proton and launch it once to create
+   the prefix. Open `protontricks --gui`, select that installer shortcut,
+   and choose **Manage CD/DVD drives (CDEmu)**.
+2. Select the Windows drive letter required by the installer, normally `D:`.
+3. Choose an existing CDEmu reader. You can **Load or replace CD/DVD image**
+   (opens a native image file picker), **Mount loaded disc**, **Unmount disc
+   filesystem**, **Eject disc image**, or **Map mounted disc to D:**.
+4. When an image is loaded or mounted, Protontricks also updates the chosen
+   prefix's `d:` mountpoint and `d::` raw device links. The manager remains
+   open for another disc change; keep the Windows installer open as needed.
+5. Optionally **Add virtual reader** if you need more than one reader. The
+   manager records readers it creates in the selected prefix so the
+   **Remove last reader created for this game** option only appears for its
+   own last, empty, unmapped reader.
+6. Use **Restore original D: mapping** to undo Protontricks's symlink
+   changes for the selected game.
+
+**Global scope and safety:** CDEmu readers and images are **system-wide
+resources**, not game-specific resources. Adding, removing, ejecting and
+unmounting a reader can affect unrelated applications. Destructive actions
+require confirmation and regular unmounting (never forced); a busy device
+will not be forcibly ejected. `cdemu remove-device` can remove **only the
+last reader**. The UI refuses to remove readers it did not create for the
+selected game, readers with loaded images, and readers still referenced by
+the game's Wine raw device links. It does not automatically delete global
+readers when the game is removed.
+
+**Per-game scope:** Only Wine drive mappings and reader ownership records
+are stored in the game's Proton prefix. Original mappings can be restored;
+regular files and mappings changed externally are not silently overwritten.
+
+**Limitations:** The GUI does not emulate optical drives itself and depends
+on the installed CDEmu daemon and udisks. Some older installers may cache
+drive information or require other CD-ROM/DRM behavior. Removing a Steam
+shortcut may create a different AppID/prefix when added again.
 
 ## Desktop
 
