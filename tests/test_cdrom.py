@@ -28,8 +28,8 @@ def test_switch_mapping_and_keep_original_backup(prefix, tmp_path):
     dos = prefix / "dosdevices"
     (dos / "d:").symlink_to("/old/cdrom")
     (dos / "d::").symlink_to("/dev/sr0")
-    disc2 = tmp_path / "VTMB_2"
-    disc3 = tmp_path / "VTMB_3"
+    disc2 = tmp_path / "disc2"
+    disc3 = tmp_path / "disc3"
     disc2.mkdir()
     disc3.mkdir()
 
@@ -70,8 +70,8 @@ def test_refuse_to_overwrite_regular_file(prefix, tmp_path):
 
 def test_relink_after_wine_changes_or_removes_links(prefix, tmp_path):
     """Wine's mount manager drops d: when a disc is unmounted."""
-    disc1 = tmp_path / "VTMB_1"
-    disc2 = tmp_path / "VTMB_2"
+    disc1 = tmp_path / "disc1"
+    disc2 = tmp_path / "disc2"
     disc1.mkdir()
     disc2.mkdir()
     dos = prefix / "dosdevices"
