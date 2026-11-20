@@ -133,16 +133,18 @@ def _run_gui(args, input_=None, strip_nonascii=False):
     If 'strip_nonascii' is True, strip non-ASCII characters to workaround
     environments that can't handle all characters
     """
+    if isinstance(input_, bytes):
+        input_ = input_.decode("utf-8", errors="replace")
+
     if strip_nonascii:
-        # Convert to bytes and back to strings while stripping
-        # non-ASCII characters
+        # Strip non-ASCII text on systems with incompatible locales.
         args = [
             arg.encode("ascii", "ignore").decode("ascii") for arg in args
         ]
         if input_:
             input_ = input_.encode("ascii", "ignore").decode("ascii")
 
-    if input_:
+    if input_ is not None:
         input_ = input_.encode("utf-8")
 
     try:
@@ -158,7 +160,9 @@ def _run_gui(args, input_=None, strip_nonascii=False):
                 "characters. Some app names may not show up correctly. "
                 "Please use an UTF-8 locale to avoid this warning."
             )
-            return _run_gui(args, strip_nonascii=True)
+            return _run_gui(
+                args, input_=input_, strip_nonascii=True
+            )
 
         raise
 
@@ -506,7 +510,10 @@ def _choose_from_list(title, prompt, rows):
         "--title", title, "--text", prompt, "--column", "Option"
     ]
     if provider == "yad":
-        args += ["--no-headers", "--no-markup", "--center"]
+        args += [
+            "--no-headers", "--no-markup", "--center",
+            "--print-column", "1", "--separator", ""
+        ]
     else:
         args += ["--hide-header"]
     try:
@@ -518,11 +525,16 @@ def _choose_from_list(title, prompt, rows):
             "{} returned an error: {}".format(provider, exc.stderr)
         ) from exc
     value = result.stdout.decode("utf-8").strip()
+    # Older YAD builds may retain the default trailing separator.
+    if provider == "yad" and value.endswith("|"):
+        value = value[:-1]
     return value or None
 
 
 def select_gui_action():
-    """Choose an action after selecting a Steam game."""
+    """Keep the original Winetricks flow when CDEmu is unavailable."""
+    if shutil.which("cdemu") is None:
+        return "winetricks"
     selection = _choose_from_list(
         "Protontricks", "Choose an action for the selected game",
         ["Run Winetricks", "Manage CD/DVD drives (CDEmu)"]
@@ -535,8 +547,13 @@ def select_gui_action():
 
 
 def _select_disc_image():
-    """Choose an ISO/BIN-CUE descriptor using the configured dialog provider."""
+    """Choose an image supported by CDEmu, without restricting all files."""
     provider = get_gui_provider()
+    filters = [
+        "Disc images | *.iso *.ISO *.cue *.CUE *.mds *.MDS "
+        "*.ccd *.CCD *.nrg *.NRG",
+        "All files | *"
+    ]
     if provider == "yad":
         args = [
             "yad", "--file", "--title", "Select a CD/DVD image",
@@ -547,6 +564,8 @@ def _select_disc_image():
             "zenity", "--file-selection", "--title", "Select a CD/DVD image",
             "--window-icon", "wine"
         ]
+    for pattern in filters:
+        args += ["--file-filter", pattern]
     try:
         result = _run_gui(args)
     except CalledProcessError as exc:
@@ -598,16 +617,20 @@ def manage_cdrom_drives_gui(prefix, game_name):
     Images and devices are system-wide. Only dosdevices links and the record
     of readers created by this manager are stored in the selected prefix.
     """
-    selected_letter = _choose_from_list(
-        "Protontricks CD/DVD Manager",
-        "Choose the Windows drive letter for " + game_name,
-        [f"{chr(number)}:" for number in range(ord("D"), ord("Z"))]
-    )
-    if selected_letter is None:
+    try:
+        selected_letter = _choose_from_list(
+            "Protontricks CD/DVD Manager",
+            "Choose the Windows drive letter for " + game_name,
+            [f"{chr(number)}:" for number in range(ord("D"), ord("Z"))]
+        )
+        if selected_letter is None:
+            return
+        letter = selected_letter.rstrip(":")
+        if len(letter) != 1 or not ("D" <= letter <= "Y"):
+            raise CDROMError("Invalid Windows drive letter.")
+    except (CDROMError, OSError, RuntimeError, ValueError) as exc:
+        _cdrom_error_dialog(exc)
         return
-    letter = selected_letter.rstrip(":")
-    if len(letter) != 1 or not ("D" <= letter <= "Y"):
-        raise CDROMError("Invalid Windows drive letter.")
 
     while True:
         try:
@@ -634,13 +657,18 @@ def manage_cdrom_drives_gui(prefix, game_name):
             )
         actions["Refresh reader list"] = ("refresh", None)
 
-        selection = _choose_from_list(
-            "Protontricks CD/DVD Manager — " + game_name,
-            "CDEmu readers are shared by all applications. "
-            "Windows drive {}: belongs only to this game's Proton prefix. "
-            "Select a reader or a management action.".format(letter),
-            list(actions)
-        )
+        try:
+            selection = _choose_from_list(
+                "Protontricks CD/DVD Manager - " + game_name,
+                "CDEmu readers are shared by all applications. "
+                "Windows drive {}: belongs only to this game's "
+                "Proton prefix. Select a reader or a management "
+                "action.".format(letter),
+                list(actions)
+            )
+        except (CDROMError, OSError, RuntimeError, ValueError) as exc:
+            _cdrom_error_dialog(exc)
+            return
         if selection is None:
             return
         if selection not in actions:
@@ -693,7 +721,7 @@ def manage_cdrom_drives_gui(prefix, game_name):
                 "Back to readers"
             ]
             choice = _choose_from_list(
-                "CD/DVD reader {} — {}".format(slot, game_name),
+                "CD/DVD reader {} - {}".format(slot, game_name),
                 _drive_label(drive) + "\n"
                 "Selecting Load/Mount also updates {}: for this game. "
                 "Eject/Unmount may affect other applications.".format(letter),
@@ -750,5 +778,5 @@ def manage_cdrom_drives_gui(prefix, game_name):
                     "point to an unmounted disc.".format(slot)
                 ):
                     eject_drive(slot)
-        except (CDROMError, OSError, RuntimeError) as exc:
+        except (CDROMError, OSError, RuntimeError, ValueError) as exc:
             _cdrom_error_dialog(exc)
