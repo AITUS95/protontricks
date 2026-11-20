@@ -81,15 +81,34 @@ def _selected_drive(slot):
 
 
 def mount_drive(slot):
+    """Wait for optical media probing and tolerate desktop automount races."""
     drive = _selected_drive(slot)
     if not drive.loaded:
         raise CDROMError("Load an image into reader {} first.".format(slot))
-    if drive.mountpoint is None:
-        _command(["udisksctl", "mount", "-b", str(drive.device)])
+    if drive.mountpoint is not None:
+        return drive
+
+    last_error = None
+    for attempt in range(10):
         drive = _selected_drive(slot)
-    if drive.mountpoint is None:
-        raise CDROMError("The disc was not mounted; check udisksctl output.")
-    return drive
+        if drive.mountpoint is not None:
+            return drive
+        try:
+            _command(["udisksctl", "mount", "-b", str(drive.device)])
+        except CDROMError as exc:
+            # udisks may not have probed the newly inserted image yet,
+            # or a desktop automounter may mount it between the checks.
+            last_error = exc
+        drive = _selected_drive(slot)
+        if drive.mountpoint is not None:
+            return drive
+        if attempt < 9:
+            time.sleep(0.3)
+
+    message = "CDEmu reader {} did not become mounted.".format(slot)
+    if last_error is not None:
+        message += " Last mount attempt: {}".format(last_error)
+    raise CDROMError(message)
 
 
 def unmount_drive(slot):
