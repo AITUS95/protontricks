@@ -118,6 +118,31 @@ def _load_state(path):
     return state
 
 
+def find_disc_letters(prefix, mountpoints):
+    """Return the prefix's drive letters that point to a mounted disc.
+
+    Wine assigns a letter (not always D:) to a disc mounted before the
+    installer starts, and the installer then looks for the next disc on
+    that same letter. Returns ``{letter: mountpoint}`` sorted by letter.
+    """
+    wanted = {str(Path(mountpoint)) for mountpoint in mountpoints}
+    found = {}
+    try:
+        links = list((Path(prefix) / "dosdevices").iterdir())
+    except OSError:
+        return found
+    for link in links:
+        name = link.name.lower()
+        if not (len(name) == 2 and name[1] == ":" and "d" <= name[0] <= "y"):
+            continue
+        if not link.is_symlink():
+            continue
+        target = os.readlink(link).rstrip("/")
+        if target in wanted:
+            found[name[0].upper()] = target
+    return dict(sorted(found.items()))
+
+
 def set_cdrom_mapping(prefix, drive, letter="D"):
     """Point a Windows letter and its raw-device link to a mounted disc.
 

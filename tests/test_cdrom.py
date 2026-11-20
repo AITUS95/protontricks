@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 
 from protontricks.cdemu_backend import OpticalDrive
-from protontricks.cdrom import CDROMError, set_cdrom_mapping
+from protontricks.cdrom import (
+    CDROMError, find_disc_letters, set_cdrom_mapping
+)
 
 
 def CDEmuDrive(slot, device, mountpoint, image="/disc.iso"):
@@ -148,3 +150,17 @@ def test_stale_temp_backup_reports_path_and_restores_links(
     assert not (prefix / "dosdevices" / "d:").is_symlink()
     assert not (prefix / "dosdevices" / "d::").is_symlink()
     assert temporary.read_text() == "stale"
+
+
+def test_find_disc_letters_assigned_by_wine(prefix, tmp_path):
+    disc1 = tmp_path / "disc1"
+    disc1.mkdir()
+    dos = prefix / "dosdevices"
+    (dos / "c:").symlink_to("../drive_c")
+    (dos / "k:").symlink_to(str(disc1))
+    (dos / "d::").symlink_to("/dev/sr1")
+    (dos / "z:").symlink_to("/")
+
+    assert find_disc_letters(prefix, [disc1]) == {"K": str(disc1)}
+    assert find_disc_letters(prefix, []) == {}
+    assert find_disc_letters(tmp_path / "missing", [disc1]) == {}

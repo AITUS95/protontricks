@@ -922,3 +922,61 @@ class TestCDROMMinimalMenus:
             _drive_label(drive), "Add virtual reader",
             "Remove last virtual reader (reader 2)"
         ]
+
+
+class TestCDROMDriveLetterDetection:
+    """Installers started from a mounted disc use the letter Wine gave it."""
+
+    def test_letter_assigned_by_wine_is_listed_first(
+            self, monkeypatch, tmp_path):
+        from protontricks.gui import _drive_letter_choices
+
+        disc1 = tmp_path / "VOLUME_1"
+        disc1.mkdir()
+        prefix = tmp_path / "pfx"
+        (prefix / "dosdevices").mkdir(parents=True)
+        (prefix / "dosdevices" / "k:").symlink_to(str(disc1))
+        monkeypatch.setattr(
+            "protontricks.gui.list_drives",
+            lambda: [OpticalDrive(0, Path("/dev/sr0"), "/d1.cue", disc1)]
+        )
+
+        prompt, rows = _drive_letter_choices(prefix, "Fake game")
+        assert rows[0] == "K: - VOLUME_1 (disc already mapped by Wine)"
+        assert "K:" not in rows[1:]
+        assert len(rows) == 22
+        assert "choose K:" in prompt
+
+    def test_detected_letter_row_selects_that_letter(
+            self, monkeypatch, tmp_path):
+        from protontricks.gui import _drive_label, manage_cdrom_drives_gui
+
+        prefix = tmp_path / "pfx"
+        (prefix / "dosdevices").mkdir(parents=True)
+        drive = OpticalDrive(0, Path("/dev/sr0"))
+        menus = []
+        choices = iter([
+            "K: - VOLUME_1 (disc already mapped by Wine)",
+            _drive_label(drive), "Back", None
+        ])
+
+        def choose(title, prompt, rows):
+            menus.append(rows)
+            return next(choices)
+
+        monkeypatch.setattr("protontricks.gui._choose_from_list", choose)
+        monkeypatch.setattr("protontricks.gui.list_drives", lambda: [drive])
+        manage_cdrom_drives_gui(prefix, "Fake game")
+        assert "Map disc to K:" in menus[2]
+
+    def test_letter_prompt_without_cdemu(self, monkeypatch, tmp_path):
+        from protontricks.cdrom import CDROMError
+        from protontricks.gui import _drive_letter_choices
+
+        def missing():
+            raise CDROMError("cdemu is not installed")
+
+        monkeypatch.setattr("protontricks.gui.list_drives", missing)
+        prompt, rows = _drive_letter_choices(tmp_path, "Fake game")
+        assert rows[0] == "D:" and rows[-1] == "Y:"
+        assert prompt == "Choose the Windows drive letter for Fake game"

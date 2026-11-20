@@ -103,30 +103,31 @@ devices or disc images.
 
 ### Installing a multi-disc game
 
-Multi-disc installers look for the next disc on the drive they were started
-from, so start the installer from the mapped drive letter, not from its
-Linux path.
+Installers look for the next disc on the drive letter they were started
+from, so the next disc must be mapped to that same letter.
 
-1. Add the installer from Disc 1 (for example `setup.exe`) to Steam as a
-   **non-Steam game**, enable Proton for it and launch it once to create its
-   prefix, then close the installer.
-2. Run `protontricks --gui`, select that shortcut, choose **Manage CD/DVD
-   drives (CDEmu)** and the drive letter (usually `D:`). Select a reader and
-   **Load or replace disc image** with Disc 1: it is loaded, mounted and
-   mapped to `D:` (the `d:` mountpoint and `d::` raw device links).
-3. Find the shortcut's AppID with `protontricks -s <name>` and start the
-   installer from `D:`:
+1. Load and mount Disc 1 with CDEmu (gCDEmu, `cdemu load 0 <image>` or this
+   manager), add the installer on it (for example `setup.exe`) to Steam as a
+   **non-Steam game**, enable Proton for it and launch it. Wine gives the
+   mounted disc a drive letter (often `D:`, but not always) and the
+   installer runs from it.
+2. When the installer asks for the next disc, keep it open, run
+   `protontricks --gui`, select the shortcut and choose **Manage CD/DVD
+   drives (CDEmu)**. The letter Wine gave the disc is listed **first**,
+   marked "disc already mapped by Wine": choose it.
+3. Select the reader holding Disc 1 and choose **Load or replace disc
+   image**. The image is loaded, mounted and mapped to that letter (the
+   `x:` mountpoint and `x::` raw device links of the game's prefix). If the
+   running installer keeps Disc 1 busy, Protontricks never forces the
+   unmount: it offers to load the next disc into an empty reader (adding one
+   if needed) and maps the letter to it. If the letter is not mapped
+   afterwards, use **Map disc to …**.
+4. Click **Retry/OK** in the installer. Repeat for each disc and eject the
+   discs once it has finished.
 
-   ```sh
-   protontricks -c 'wine start /d "D:\\" "D:\\setup.exe"' <APPID>
-   ```
-
-4. When the installer asks for the next disc, use **Load or replace disc
-   image** again. If the running installer keeps Disc 1 busy, Protontricks
-   never forces the unmount: it offers to load the next disc into an empty
-   reader (adding one if needed) and maps `D:` to it. If `D:` is not mapped
-   afterwards, use **Map disc to D:**. Then click **Retry/OK** in the
-   installer. Repeat for each disc and eject the discs once it has finished.
+If no letter is detected (for example the installer was started from a
+copy of the disc), start it from the mapped letter instead:
+`protontricks -c 'wine start /d "D:\\" "D:\\setup.exe"' <APPID>`.
 
 ### Menus
 
@@ -134,7 +135,7 @@ Linux path.
   virtual reader**. CDEmu can only remove its last reader; it must hold no
   disc image, and the default readers 0 and 1 are never removed.
 - **Reader menu:** **Load or replace disc image**, **Eject disc**, **Map disc
-  to D:** (mounts a loaded disc if needed) and **Back**.
+  to <letter>:** (mounts a loaded disc if needed) and **Back**.
 
 CDEmu readers and images are **system-wide**: adding, removing or ejecting
 them affects every application. Only the drive mappings, plus a backup of
