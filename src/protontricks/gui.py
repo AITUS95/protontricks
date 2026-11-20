@@ -12,12 +12,11 @@ from subprocess import PIPE, CalledProcessError, run
 
 from PIL import Image
 
-from .cdrom import (CDROMError, has_cdrom_backup,
-                    restore_cdrom_mapping, set_cdrom_mapping)
+from .cdrom import CDROMError, set_cdrom_mapping
 from .cdemu_backend import (
     DeviceBusyError, add_drive, eject_drive, find_empty_drive,
-    get_owned_drives, list_drives, load_image,
-    mount_drive, remove_drive, to_cdrom_drive, unmount_drive
+    get_owned_drives, list_drives, load_image, mount_drive, remove_drive,
+    to_cdrom_drive
 )
 from .config import get_config
 from .flatpak import get_inaccessible_paths
@@ -642,10 +641,13 @@ def _load_into_spare_reader(prefix, busy_slot, image_path, letter):
 
 
 def manage_cdrom_drives_gui(prefix, game_name):
-    """Manage CDEmu globally and map a reader into one selected Proton prefix.
+    """Swap CD/DVD images for one game's Proton prefix with CDEmu.
 
-    Images and devices are system-wide. Only dosdevices links and the record
-    of readers created by this manager are stored in the selected prefix.
+    The menus are intentionally minimal: add or remove a virtual reader,
+    load (or replace) an image, eject it, and map a disc to the selected
+    Windows drive letter. Images and readers are system-wide; only the
+    dosdevices links and the record of readers created here are stored in
+    the selected prefix.
     """
     try:
         selected_letter = _choose_from_list(
@@ -666,7 +668,6 @@ def manage_cdrom_drives_gui(prefix, game_name):
         try:
             drives = list_drives()
             owned = get_owned_drives(prefix)
-            can_restore = has_cdrom_backup(prefix, letter)
         except (CDROMError, OSError) as exc:
             _cdrom_error_dialog(exc)
             return
@@ -674,26 +675,21 @@ def manage_cdrom_drives_gui(prefix, game_name):
         actions = {}
         for drive in drives:
             actions[_drive_label(drive)] = ("reader", drive.slot)
-        actions["Add virtual reader (system-wide)"] = ("add", None)
+        actions["Add virtual reader"] = ("add", None)
+        # Only the last reader created by this manager for this game can be
+        # removed safely ("cdemu remove-device" always removes the last one).
         if drives and {
             "slot": drives[-1].slot, "device": str(drives[-1].device)
         } in owned:
-            actions["Remove last reader created for this game"] = (
+            actions["Remove last virtual reader"] = (
                 "remove", drives[-1].slot
             )
-        if can_restore:
-            actions["Restore original {}: mapping".format(letter)] = (
-                "restore", None
-            )
-        actions["Refresh reader list"] = ("refresh", None)
 
         try:
             selection = _choose_from_list(
                 "Protontricks CD/DVD Manager - " + game_name,
-                "CDEmu readers are shared by all applications. "
-                "Windows drive {}: belongs only to this game's "
-                "Proton prefix. Select a reader or a management "
-                "action.".format(letter),
+                "Select a reader to load, eject or map a disc to "
+                "{}:.".format(letter),
                 list(actions)
             )
         except (CDROMError, OSError, RuntimeError, ValueError) as exc:
@@ -707,9 +703,6 @@ def manage_cdrom_drives_gui(prefix, game_name):
         operation, slot = actions[selection]
 
         try:
-            if operation == "refresh":
-                continue
-
             if operation == "add":
                 if _confirm_cdrom_action(
                     "Add a CDEmu virtual reader? This changes the system-"
@@ -727,40 +720,29 @@ def manage_cdrom_drives_gui(prefix, game_name):
                     remove_drive(prefix, slot)
                 continue
 
-            if operation == "restore":
-                if _confirm_cdrom_action(
-                    "Restore the original {}: mapping for this game?".format(
-                        letter
-                    )
-                ):
-                    restore_cdrom_mapping(prefix, letter)
-                continue
-
             drive = next(
                 (item for item in list_drives() if item.slot == slot), None
             )
             if drive is None:
-                raise CDROMError("Reader no longer exists. Refresh.")
+                raise CDROMError("Reader no longer exists.")
 
+            map_option = "Map disc to {}:".format(letter)
             options = [
-                "Load or replace CD/DVD image",
-                "Mount loaded disc",
-                "Unmount disc filesystem",
-                "Eject disc image",
-                "Map mounted disc to {}:".format(letter),
-                "Back to readers"
+                "Load or replace disc image",
+                "Eject disc",
+                map_option,
+                "Back"
             ]
             choice = _choose_from_list(
                 "CD/DVD reader {} - {}".format(slot, game_name),
                 _drive_label(drive) + "\n"
-                "Selecting Load/Mount also updates {}: for this game. "
-                "Eject/Unmount may affect other applications.".format(letter),
+                "Loading an image also maps it to {}:.".format(letter),
                 options
             )
-            if choice is None or choice == "Back to readers":
+            if choice is None or choice == "Back":
                 continue
 
-            if choice == "Load or replace CD/DVD image":
+            if choice == "Load or replace disc image":
                 image_path = _select_disc_image()
                 if image_path is None:
                     continue
@@ -768,7 +750,7 @@ def manage_cdrom_drives_gui(prefix, game_name):
                     (item for item in list_drives() if item.slot == slot), None
                 )
                 if current is None:
-                    raise CDROMError("Reader disappeared. Refresh.")
+                    raise CDROMError("Reader no longer exists.")
                 if current.loaded and not _confirm_cdrom_action(
                     "Replacing the loaded disc will unmount and eject "
                     "the current image from reader {}. This reader is "
@@ -790,27 +772,14 @@ def manage_cdrom_drives_gui(prefix, game_name):
                 set_cdrom_mapping(
                     prefix, to_cdrom_drive(drive), letter
                 )
-            elif choice == "Mount loaded disc":
+            elif choice == map_option:
+                # Mount a loaded but unmounted disc first, so mapping works
+                # without a separate mount step.
                 drive = mount_drive(slot)
                 set_cdrom_mapping(
                     prefix, to_cdrom_drive(drive), letter
                 )
-            elif choice == "Map mounted disc to {}:".format(letter):
-                drive = next(
-                    (item for item in list_drives() if item.slot == slot), None
-                )
-                if drive is None:
-                    raise CDROMError("Reader disappeared. Refresh.")
-                set_cdrom_mapping(
-                    prefix, to_cdrom_drive(drive), letter
-                )
-            elif choice == "Unmount disc filesystem":
-                if _confirm_cdrom_action(
-                    "Unmount reader {}? This may affect other "
-                    "applications using the disc.".format(slot)
-                ):
-                    unmount_drive(slot)
-            elif choice == "Eject disc image":
+            elif choice == "Eject disc":
                 if _confirm_cdrom_action(
                     "Unmount and eject reader {}? This affects the "
                     "shared CDEmu device; the Wine mapping may temporarily "
