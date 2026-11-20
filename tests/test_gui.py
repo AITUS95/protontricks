@@ -480,18 +480,102 @@ class TestPromptFilesystemAccess:
 
 
 class TestCDROMGUI:
-    def test_action_selection(self, gui_provider):
+    def test_action_selection(self, gui_provider, home_dir):
         from protontricks.gui import select_gui_action
 
-        gui_provider.mock_stdout = "Manage CD/DVD drives (CDEmu)"
+        (home_dir / ".local" / "bin" / "cdemu").touch()
+        gui_provider.mock_stdout = "Manage CD/DVD drives (CDEmu)|\\n"
         assert select_gui_action() == "cdrom"
-        assert "--list" in gui_provider.args
+        assert "--separator" in gui_provider.args
+        assert gui_provider.args[
+            gui_provider.args.index("--separator") + 1
+        ] == ""
+        assert "--print-column" in gui_provider.args
 
-        gui_provider.mock_stdout = "Run Winetricks"
+        gui_provider.mock_stdout = "Run Winetricks|\\n"
         assert select_gui_action() == "winetricks"
 
         gui_provider.mock_stdout = ""
         assert select_gui_action() is None
+
+    def test_no_cdemu_keeps_legacy_winetricks_flow(self, gui_provider):
+        from protontricks.gui import select_gui_action
+
+        assert select_gui_action() == "winetricks"
+        assert not getattr(gui_provider, "args", None)
+
+    def test_list_selection_zenity(self, gui_provider, monkeypatch):
+        from protontricks.gui import _choose_from_list, get_gui_provider
+
+        monkeypatch.setenv("PROTONTRICKS_GUI", "zenity")
+        get_gui_provider.cache_clear()
+        gui_provider.mock_stdout = "D:\\n"
+        assert _choose_from_list("Title", "Prompt", ["D:", "E:"]) == "D:"
+        assert "--separator" not in gui_provider.args
+
+    def test_invalid_drive_letter_displays_error(
+            self, monkeypatch, tmp_path):
+        from protontricks.gui import manage_cdrom_drives_gui
+
+        errors = []
+        monkeypatch.setattr(
+            "protontricks.gui._choose_from_list",
+            lambda *args: "invalid"
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._cdrom_error_dialog",
+            lambda message: errors.append(str(message))
+        )
+        manage_cdrom_drives_gui(tmp_path, "Example")
+        assert len(errors) == 1
+        assert "Invalid Windows drive letter" in errors[0]
+
+    def test_action_dialog_failure_is_handled(
+            self, monkeypatch, tmp_path):
+        from protontricks.gui import manage_cdrom_drives_gui
+
+        calls = [0]
+        errors = []
+
+        def select(*args):
+            calls[0] += 1
+            if calls[0] == 1:
+                return "D:"
+            raise RuntimeError("YAD failed")
+
+        monkeypatch.setattr(
+            "protontricks.gui._choose_from_list", select
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.list_drives", lambda: []
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.get_owned_drives", lambda prefix: []
+        )
+        monkeypatch.setattr(
+            "protontricks.gui.has_cdrom_backup",
+            lambda *args: False
+        )
+        monkeypatch.setattr(
+            "protontricks.gui._cdrom_error_dialog",
+            lambda message: errors.append(str(message))
+        )
+
+        manage_cdrom_drives_gui(tmp_path, "Example")
+        assert errors == ["YAD failed"]
+
+    def test_gui_locale_fallback_preserves_list_rows(
+            self, locale_error_zenity):
+        from protontricks.gui import _choose_from_list
+
+        locale_error_zenity.mock_stdout = "D:"
+        result = _choose_from_list(
+            "CD/DVD Manager - unicode \\u00e9",
+            "Select unit",
+            ["D:", "E:"]
+        )
+        assert result == "D:"
+        assert locale_error_zenity.kwargs["input"] == b"D:\\nE:"
 
     def test_load_image_and_assign_to_selected_prefix(
             self, monkeypatch, tmp_path):
