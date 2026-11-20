@@ -33,8 +33,13 @@ def list_drives():
     for line in status.splitlines():
         match = re.match(r"^\s*(\d+)\s+(True|False)\s*(.*)$", line)
         if match:
+            image = match.group(3).strip()
+            if match.group(2) == "True" and not image:
+                raise CDROMError(
+                    "CDEmu reports a loaded reader without an image path."
+                )
             image_by_slot[int(match.group(1))] = (
-                match.group(3).strip() if match.group(2) == "True" else ""
+                image if match.group(2) == "True" else ""
             )
 
     result = []
@@ -43,6 +48,10 @@ def list_drives():
         if not match:
             continue
         slot = int(match.group(1))
+        if slot not in image_by_slot:
+            raise CDROMError(
+                "CDEmu did not report status for reader {}.".format(slot)
+            )
         device = Path(match.group(2))
         mountpoint = None
         try:
