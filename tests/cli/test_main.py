@@ -819,6 +819,24 @@ class TestCLIGUI:
         )
 
 
+    def test_explicit_gui_args_skip_cdemu_chooser(
+            self, cli, steam_app_factory, default_proton,
+            gui_provider, command_mock, monkeypatch):
+        """Explicit Winetricks args keep the historical GUI behavior."""
+        steam_app_factory(name="Fake game", appid=10)
+        gui_provider.mock_stdout = "Fake game: 10"
+
+        def unexpected_chooser():
+            raise AssertionError("CDEmu chooser must not open")
+
+        monkeypatch.setattr(
+            "protontricks.cli.main.select_gui_action",
+            unexpected_chooser
+        )
+        cli(["--gui", "--", "-q"])
+        assert command_mock.commands[-1].args[1:] == ["--gui", "-q"]
+
+
     def test_manage_cdrom_from_gui(
             self, cli, default_proton, steam_app_factory, gui_provider,
             monkeypatch):
